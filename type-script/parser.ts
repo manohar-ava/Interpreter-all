@@ -1,4 +1,10 @@
-import { Identifier, LetStatement, Program, type Statement } from "./ast";
+import {
+  Identifier,
+  LetStatement,
+  ReturnStatement,
+  Program,
+  type Statement,
+} from "./ast";
 import { Lexer } from "./lexer";
 import { token, type Token, type tokenType } from "./token";
 
@@ -6,6 +12,7 @@ export interface IParser {
   l: Lexer;
   curToken: Token;
   peekToken: Token;
+  errors: string[];
   parseProgram(): Program;
   parseStatement(): Statement | undefined;
   parseLetStatement(): LetStatement | undefined;
@@ -18,6 +25,7 @@ export class Parser implements IParser {
     this.l = l;
     this.curToken = { Type: "", Literal: "" };
     this.peekToken = { Type: "", Literal: "" };
+    this.errors = [];
     this.nextToken();
     this.nextToken();
   }
@@ -41,6 +49,8 @@ export class Parser implements IParser {
     switch (this.curToken.Type) {
       case token.LET:
         return this.parseLetStatement();
+      case token.RETURN:
+        return this.parseReturnStatement();
       default:
         return undefined;
     }
@@ -50,6 +60,14 @@ export class Parser implements IParser {
     if (!this.expectPeek(token.IDENT)) return undefined;
     stmt.name = new Identifier(this.curToken, this.curToken.Literal);
     if (!this.expectPeek(token.ASSIGN)) return undefined;
+    while (!this.curTokenIs(token.SEMICOLON)) {
+      this.nextToken();
+    }
+    return stmt;
+  }
+  parseReturnStatement(): ReturnStatement | undefined {
+    let stmt = new ReturnStatement(this.curToken);
+    this.nextToken();
     while (!this.curTokenIs(token.SEMICOLON)) {
       this.nextToken();
     }
@@ -66,7 +84,12 @@ export class Parser implements IParser {
       this.nextToken();
       return true;
     } else {
+      this.peekError(t);
       return false;
     }
+  }
+  peekError(t: tokenType) {
+    const msg = `expected next token to be ${t}, got ${this.peekToken.Type}`;
+    this.errors.push(msg);
   }
 }
