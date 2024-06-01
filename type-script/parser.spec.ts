@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { LetStatement, type Statement } from "./ast";
-
+console.log("hello")
 function checkParserErrors(p) {
   const errors = p.errors;
   if (!errors.length) return;
