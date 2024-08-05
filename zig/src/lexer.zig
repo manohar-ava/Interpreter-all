@@ -19,34 +19,38 @@ const Lexer = struct {
         // print("|{c}|{}|{}|\n", .{ self.ch, self.readPosition, self.position });
     }
 
-    fn nextToken(self: *Lexer) token.Token {
+    fn nextToken(self: *Lexer) token.tokens {
         try self.skipWhiteSpace();
         if (self.inputLen == self.position) {
-            return newToken(.eof, "");
+            return .eof;
         }
-        const char_as_string = [1]u8{self.ch};
-        // print("{any} {any} {} {} char as string\n", .{ &char_as_string, self.ch, self.input.len, self.position });
-        const result: token.Token = switch (self.ch) {
-            '=' => newToken(.assign, &char_as_string),
-            '+' => newToken(.plus, &char_as_string),
-            '{' => newToken(.lbrace, &char_as_string),
-            '}' => newToken(.rbrace, &char_as_string),
-            '(' => newToken(.lparen, &char_as_string),
-            ')' => newToken(.rparen, &char_as_string),
-            ',' => newToken(.comma, &char_as_string),
-            ';' => newToken(.semicolon, &char_as_string),
+        const result: token.tokens = switch (self.ch) {
+            '=' => .assign,
+            '+' => .plus,
+            '{' => .lbrace,
+            '}' => .rbrace,
+            '(' => .lparen,
+            ')' => .rparen,
+            ',' => .comma,
+            ';' => .semicolon,
+            '!' => .bang,
+            '-' => .minus,
+            '/' => .slash,
+            '*' => .asterisk,
+            '<' => .lesserThan,
+            '>' => .greaterThan,
             else => {
                 return if (isLetter(self.ch)) {
                     const ident = self.readIdentifier();
-                    const newTok = newToken(token.lookUpIdentifer(ident), ident);
-                    // print("{s} {s} {} ident \n", .{ ident, newTok.literal, newTok.type });
-                    return newTok;
+                    const identType = token.lookUpIdentifer(ident);
+                    return switch (identType) {
+                        .ident => .{ .ident = ident },
+                        else => identType,
+                    };
                 } else if (isDigit(self.ch)) {
-                    const newTok = newToken(.int, self.readNumber());
-                    // print("{s} {} ident \n", .{ newTok.literal, newTok.type });
-                    return newTok;
+                    return .{ .int = self.readNumber() };
                 } else {
-                    return newToken(.illegal, &char_as_string);
+                    return .illegal;
                 };
             },
         };
@@ -88,15 +92,6 @@ fn isDigit(ch: u8) bool {
     return if (ch >= 48 and ch <= 57) true else false;
 }
 
-fn newToken(tok: token.tokens, ch: []const u8) token.Token {
-    return if (ch.len == 1)
-        token.Token{ .literal = ch[0..1], .type = tok }
-    else
-        token.Token{ .literal = ch, .type = tok };
-}
-
-const tokenTuple = struct { token: token.tokens, value: []const u8 };
-
 test "Test next tokens" {
     const input =
         \\let five = 5;
@@ -105,52 +100,65 @@ test "Test next tokens" {
         \\x + y;
         \\};
         \\let result = add(five, ten);
+        \\!-/*5;
+        \\5 < 10 > 5;
     ;
 
-    const tests = [_]tokenTuple{
-        .{ .token = .let, .value = "let" },
-        .{ .token = .ident, .value = "five" },
-        .{ .token = .assign, .value = "=" },
-        .{ .token = .int, .value = "5" },
-        .{ .token = .semicolon, .value = ";" },
-        .{ .token = .let, .value = "let" },
-        .{ .token = .ident, .value = "ten" },
-        .{ .token = .assign, .value = "=" },
-        .{ .token = .int, .value = "10" },
-        .{ .token = .semicolon, .value = ";" },
-        .{ .token = .let, .value = "let" },
-        .{ .token = .ident, .value = "add" },
-        .{ .token = .assign, .value = "=" },
-        .{ .token = .function, .value = "func" },
-        .{ .token = .lparen, .value = "(" },
-        .{ .token = .ident, .value = "x" },
-        .{ .token = .comma, .value = "," },
-        .{ .token = .ident, .value = "y" },
-        .{ .token = .rparen, .value = ")" },
-        .{ .token = .lbrace, .value = "{" },
-        .{ .token = .ident, .value = "x" },
-        .{ .token = .plus, .value = "+" },
-        .{ .token = .ident, .value = "y" },
-        .{ .token = .semicolon, .value = ";" },
-        .{ .token = .rbrace, .value = "}" },
-        .{ .token = .semicolon, .value = ";" },
-        .{ .token = .let, .value = "let" },
-        .{ .token = .ident, .value = "result" },
-        .{ .token = .assign, .value = "=" },
-        .{ .token = .ident, .value = "add" },
-        .{ .token = .lparen, .value = "(" },
-        .{ .token = .ident, .value = "five" },
-        .{ .token = .comma, .value = "," },
-        .{ .token = .ident, .value = "ten" },
-        .{ .token = .rparen, .value = ")" },
-        .{ .token = .semicolon, .value = ";" },
-        .{ .token = .eof, .value = "" },
+    const tests = [_]token.tokens{
+        .let,
+        .{ .ident = "five" },
+        .assign,
+        .{ .int = "5" },
+        .semicolon,
+        .let,
+        .{ .ident = "ten" },
+        .assign,
+        .{ .int = "10" },
+        .semicolon,
+        .let,
+        .{ .ident = "add" },
+        .assign,
+        .function,
+        .lparen,
+        .{ .ident = "x" },
+        .comma,
+        .{ .ident = "y" },
+        .rparen,
+        .lbrace,
+        .{ .ident = "x" },
+        .plus,
+        .{ .ident = "y" },
+        .semicolon,
+        .rbrace,
+        .semicolon,
+        .let,
+        .{ .ident = "result" },
+        .assign,
+        .{ .ident = "add" },
+        .lparen,
+        .{ .ident = "five" },
+        .comma,
+        .{ .ident = "ten" },
+        .rparen,
+        .semicolon,
+        .bang,
+        .minus,
+        .slash,
+        .asterisk,
+        .{ .int = "5" },
+        .semicolon,
+        .{ .int = "5" },
+        .lesserThan,
+        .{ .int = "10" },
+        .greaterThan,
+        .{ .int = "5" },
+        .semicolon,
+        .eof,
     };
     var lex = newLexer(input);
     for (tests) |value| {
         const tok = lex.nextToken();
-        print("{s} {} === {s} {}\n", .{ tok.literal, tok.type, value.value, value.token });
-        try std.testing.expectEqualDeep(value.value, tok.literal);
-        try std.testing.expectEqualDeep(value.token, tok.type);
+        // print(" {} {}\n", .{ value, tok });
+        try std.testing.expectEqualDeep(value, tok);
     }
 }

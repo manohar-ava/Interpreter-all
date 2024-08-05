@@ -1,10 +1,10 @@
 const std = @import("std");
 pub const Token = struct { type: tokens, literal: []const u8 };
-pub const tokens = enum {
+pub const tokens = union(enum) {
+    ident: []const u8,
+    int: []const u8,
     illegal,
     eof,
-    ident,
-    int,
     assign,
     plus,
     comma,
@@ -15,6 +15,12 @@ pub const tokens = enum {
     rbrace,
     function,
     let,
+    bang,
+    minus,
+    asterisk,
+    slash,
+    greaterThan,
+    lesserThan,
 };
 
 const keyWord = struct { key: []const u8, val: tokens };
@@ -26,5 +32,5 @@ pub fn lookUpIdentifer(ident: []const u8) tokens {
             return pair.val;
         }
     }
-    return tokens.ident;
+    return .{ .ident = "" };
 }
