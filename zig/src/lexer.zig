@@ -18,14 +18,30 @@ const Lexer = struct {
         self.readPosition += 1;
         // print("|{c}|{}|{}|\n", .{ self.ch, self.readPosition, self.position });
     }
+    fn peekChar(self: *Lexer) u8 {
+        return if (self.readPosition >= self.inputLen)
+            undefined
+        else
+            self.input[self.readPosition];
+    }
+    pub fn hasTokens(self: *Lexer) bool {
+        return self.readPosition <= self.inputLen;
+    }
 
-    fn nextToken(self: *Lexer) token.tokens {
+    pub fn nextToken(self: *Lexer) token.tokens {
         try self.skipWhiteSpace();
         if (self.inputLen == self.position) {
             return .eof;
         }
         const result: token.tokens = switch (self.ch) {
-            '=' => .assign,
+            '=' => b: {
+                if (self.peekChar() == '=') {
+                    try self.readChar();
+                    break :b .equal_to;
+                } else {
+                    break :b .assign;
+                }
+            },
             '+' => .plus,
             '{' => .lbrace,
             '}' => .rbrace,
@@ -33,7 +49,14 @@ const Lexer = struct {
             ')' => .rparen,
             ',' => .comma,
             ';' => .semicolon,
-            '!' => .bang,
+            '!' => b: {
+                if (self.peekChar() == '=') {
+                    try self.readChar();
+                    break :b .not_equal_to;
+                } else {
+                    break :b .bang;
+                }
+            },
             '-' => .minus,
             '/' => .slash,
             '*' => .asterisk,
@@ -78,7 +101,7 @@ const Lexer = struct {
     }
 };
 
-fn newLexer(input: []const u8) Lexer {
+pub fn newLexer(input: []const u8) Lexer {
     var l = Lexer{ .input = input, .inputLen = input.len, .ch = undefined, .position = 0, .readPosition = 0 };
     try l.readChar();
     return l;
@@ -102,6 +125,14 @@ test "Test next tokens" {
         \\let result = add(five, ten);
         \\!-/*5;
         \\5 < 10 > 5;
+        \\if(1 > 0){
+        \\return true;
+        \\}
+        \\else{
+        \\return false;
+        \\}
+        \\1 == 1;
+        \\1 != 0;
     ;
 
     const tests = [_]token.tokens{
@@ -153,12 +184,37 @@ test "Test next tokens" {
         .greaterThan,
         .{ .int = "5" },
         .semicolon,
+        .if_stmt,
+        .lparen,
+        .{ .int = "1" },
+        .greaterThan,
+        .{ .int = "0" },
+        .rparen,
+        .lbrace,
+        .return_stmt,
+        .bool_true,
+        .semicolon,
+        .rbrace,
+        .else_stmt,
+        .lbrace,
+        .return_stmt,
+        .bool_false,
+        .semicolon,
+        .rbrace,
+        .{ .int = "1" },
+        .equal_to,
+        .{ .int = "1" },
+        .semicolon,
+        .{ .int = "1" },
+        .not_equal_to,
+        .{ .int = "0" },
+        .semicolon,
         .eof,
     };
     var lex = newLexer(input);
     for (tests) |value| {
         const tok = lex.nextToken();
-        // print(" {} {}\n", .{ value, tok });
+        // print(" {} {} \n", .{ value, tok });
         try std.testing.expectEqualDeep(value, tok);
     }
 }

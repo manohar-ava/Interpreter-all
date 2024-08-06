@@ -1,5 +1,4 @@
 const std = @import("std");
-pub const Token = struct { type: tokens, literal: []const u8 };
 pub const tokens = union(enum) {
     ident: []const u8,
     int: []const u8,
@@ -14,6 +13,11 @@ pub const tokens = union(enum) {
     lbrace,
     rbrace,
     function,
+    bool_true,
+    bool_false,
+    if_stmt,
+    else_stmt,
+    return_stmt,
     let,
     bang,
     minus,
@@ -21,10 +25,12 @@ pub const tokens = union(enum) {
     slash,
     greaterThan,
     lesserThan,
+    equal_to,
+    not_equal_to,
 };
 
 const keyWord = struct { key: []const u8, val: tokens };
-pub const key_words = [_]keyWord{ keyWord{ .key = "func", .val = .function }, keyWord{ .key = "let", .val = .let } };
+pub const key_words = [_]keyWord{ keyWord{ .key = "func", .val = .function }, keyWord{ .key = "let", .val = .let }, keyWord{ .key = "true", .val = .bool_true }, keyWord{ .key = "false", .val = .bool_false }, keyWord{ .key = "if", .val = .if_stmt }, keyWord{ .key = "else", .val = .else_stmt }, keyWord{ .key = "return", .val = .return_stmt } };
 
 pub fn lookUpIdentifer(ident: []const u8) tokens {
     for (key_words) |pair| {
