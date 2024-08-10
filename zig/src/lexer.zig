@@ -2,7 +2,7 @@ const std = @import("std");
 const print = @import("std").debug.print;
 const token = @import("./token.zig");
 
-const Lexer = struct {
+pub const Lexer = struct {
     input: []const u8,
     position: usize,
     readPosition: usize,
