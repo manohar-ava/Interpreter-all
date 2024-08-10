@@ -4,10 +4,10 @@ const token = @import("./token.zig");
 
 pub const Lexer = struct {
     input: []const u8,
-    position: usize,
-    readPosition: usize,
-    inputLen: usize,
-    ch: u8,
+    position: usize = 0,
+    readPosition: usize = 0,
+    inputLen: usize = 0,
+    ch: u8 = undefined,
     fn readChar(self: *Lexer) !void {
         if (self.readPosition >= self.input.len) {
             self.ch = undefined;
@@ -95,24 +95,25 @@ pub const Lexer = struct {
         return self.input[pos..self.position];
     }
     fn skipWhiteSpace(self: *Lexer) !void {
-        if (self.ch == ' ' or self.ch == '\n' or self.ch == '\r' or self.ch == '\t') {
+        if (std.ascii.isWhitespace(self.ch)) {
             try self.readChar();
         }
     }
 };
 
-pub fn newLexer(input: []const u8) Lexer {
-    var l = Lexer{ .input = input, .inputLen = input.len, .ch = undefined, .position = 0, .readPosition = 0 };
-    try l.readChar();
-    return l;
+pub fn newLexer(alloc: *std.mem.Allocator, input: []const u8) !*Lexer {
+    var lex_ptr = try alloc.create(Lexer);
+    lex_ptr.* = .{ .input = input, .inputLen = input.len };
+    try lex_ptr.readChar();
+    return lex_ptr;
 }
 
 fn isLetter(ch: u8) bool {
-    return if ((ch >= 97 and ch <= 122) or (ch >= 65 and ch <= 90)) true else false;
+    return std.ascii.isAlphabetic(ch);
 }
 
 fn isDigit(ch: u8) bool {
-    return if (ch >= 48 and ch <= 57) true else false;
+    return std.ascii.isDigit(ch);
 }
 
 test "Test next tokens" {
@@ -211,7 +212,11 @@ test "Test next tokens" {
         .semicolon,
         .eof,
     };
-    var lex = newLexer(input);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    var lex = try newLexer(&allocator, input);
+    defer allocator.destroy(lex);
     for (tests) |value| {
         const tok = lex.nextToken();
         // print(" {} {} \n", .{ value, tok });

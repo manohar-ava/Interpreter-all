@@ -17,7 +17,7 @@ pub const Identifier = struct {
 };
 
 pub const Program = struct {
-    statements: std.ArrayList(*Statement),
+    statements: std.ArrayList(Statement),
     pub fn getToken(self: *Program) token.tokens {
         return self.statements[0].getToken();
     }

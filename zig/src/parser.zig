@@ -13,13 +13,15 @@ pub const Parser = struct {
         self.curToken = self.peekToken;
         self.peekToken = self.l.nextToken();
     }
-    pub fn parse(self: *Parser) *ast.Program {
-        const stmts = std.ArrayList(*ast.Statement).init(self.allocator.*);
+    pub fn parse(self: *Parser) !*ast.Program {
+        var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
+        defer stmts.deinit();
         var program = ast.Program{ .statements = stmts };
-        print("{}\n", .{program});
         while (true) {
             switch (self.curToken) {
-                .eof => break,
+                .eof => {
+                    break;
+                },
                 else => {
                     const stmt = self.parseStatement();
                     try program.statements.append(stmt);
@@ -29,11 +31,12 @@ pub const Parser = struct {
         }
         return &program;
     }
-    pub fn parseStatement(self: *Parser) *ast.Statement {
+    pub fn parseStatement(self: *Parser) ast.Statement {
         return switch (self.curToken) {
             .let => {
                 const letStmt = self.parseLetStatement();
-                .{ .let = letStmt };
+                // print("{any} let smt\n\n", .{letStmt});
+                return .{ .let = letStmt };
             },
             else => unreachable,
         };
@@ -53,54 +56,47 @@ pub const Parser = struct {
             },
             else => unreachable,
         }
+        // print("c - {} p - {}\n\n ", .{ self.curToken, self.peekToken });
         while (true) {
+            // print("c - {} p - {} in loop\n\n ", .{ self.curToken, self.peekToken });
             switch (self.curToken) {
                 .semicolon => {
+                    break;
+                },
+                else => {
                     self.nextToken();
                 },
-                else => unreachable,
             }
         }
         return stmt;
     }
+    pub fn dinit() void {}
 };
 
-pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) *Parser {
-    var parser = Parser{ .l = l, .allocator = alloc };
-    parser.nextToken();
-    parser.nextToken();
-    return &parser;
+pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
+    var p_ptr = try alloc.create(Parser);
+    p_ptr.* = .{ .l = l, .allocator = alloc };
+    p_ptr.nextToken();
+    p_ptr.nextToken();
+    return p_ptr;
 }
 
 test "Test next tokens" {
-    // const MyError = error{
-    //     ProgramUndefined,
-    // };
     const input =
         \\let five = 5;
         \\let ten = 10;
     ;
-    var lex = lexer.newLexer(input);
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var allocator = arena.allocator();
-
-    const parser = newParser(&allocator, &lex);
-
-    const program = parser.parse();
-    print(" {any} \n", .{program});
-    // if (program == undefined) {
-    //     return MyError.ProgramUndefined;
-    // }
-    // if (program.statements.len != 3) {
-    //     return MyError.ProgramDoesNotHaveThreeStatements;
-    // }
-
-    // print(" {} \n", .{program});
-    // const tests = [_]token.tokens{ .{ .ident = "five" }, .{ .ident = "ten" } };
-    // for (tests) |value| {
-    //     // const stmt = program.statements[index];
-    //     // print(" {} \n", .{value});
-    //     // try std.testing.expectEqualDeep(value, tok);
-    // }
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    const stmts = try program.statements.toOwnedSlice();
+    const tests = [_]ast.Identifier{ .{ .name = "five" }, .{ .name = "ten" } };
+    for (tests, 0..) |value, index| {
+        const stmt = stmts[index];
+        try std.testing.expectEqualDeep(stmt.let.identifier.name, value.name);
+    }
 }
