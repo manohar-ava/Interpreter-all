@@ -3,6 +3,7 @@ const token = @import("./token.zig");
 
 pub const Statement = union(enum) {
     let: LetStatement,
+    return_stmt: ReturnStatement,
 };
 
 pub const Expression = union(enum) {
@@ -12,6 +13,9 @@ pub const LetStatement = struct {
     identifier: Identifier = undefined,
     value: Expression = undefined,
 };
+
+pub const ReturnStatement = struct { value: Expression = undefined };
+
 pub const Identifier = struct {
     name: []const u8,
 };
