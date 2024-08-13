@@ -1,5 +1,5 @@
 const std = @import("std");
-const print = @import("std").debug.print;
+const print = std.debug.print;
 const token = @import("./token.zig");
 
 pub const Lexer = struct {
