@@ -27,6 +27,16 @@ pub const tokens = union(enum) {
     lesserThan,
     equal_to,
     not_equal_to,
+    pub fn format(self: tokens, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (self) {
+            .minus => try writer.writeByte('-'),
+            .plus => try writer.writeByte('+'),
+            .bang => try writer.writeByte('!'),
+            .asterisk => try writer.writeByte('*'),
+            .slash => try writer.writeByte('/'),
+            else => {},
+        }
+    }
 };
 
 const keyWord = struct { key: []const u8, val: tokens };

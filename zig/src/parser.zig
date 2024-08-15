@@ -10,6 +10,10 @@ const ParserFunctions = union(enum) { prefixFn: fn () ast.Expression, infixFn: f
 
 const Precedences = enum { lowest, equals, comparision, sum, product, prefix, call };
 
+pub fn dbg(stmt: ast.Statement) void {
+    std.debug.print("{}\n", .{stmt});
+}
+
 pub const Parser = struct {
     const Self = @This();
     l: *lexer.Lexer,
@@ -123,8 +127,7 @@ pub const Parser = struct {
         }
         return stmt;
     }
-    pub fn parseExpression(self: *Self, precedence: Precedences) !ast.Expression {
-        print("Precedences to int {}\n", .{@intFromEnum(precedence)});
+    pub fn parseExpression(self: *Self, _: Precedences) !ast.Expression {
         switch (self.curToken) {
             .ident => |val| {
                 return .{ .identifier = ast.Identifier{ .name = val } };
@@ -134,9 +137,19 @@ pub const Parser = struct {
                     std.debug.print("Error parsing int: {}\n", .{err});
                     return ParserError.parseIntError;
                 };
+                std.debug.print("{}\n", .{intVal});
                 return .{ .integer = ast.IntegerLiteral{ .value = intVal } };
             },
-            else => unreachable,
+            .minus, .bang => {
+                var val = .{
+                    .prefix_exp = ast.PrefixExpression{ .operator = self.curToken },
+                };
+                self.nextToken();
+                const rightval = try self.parseExpression(Precedences.prefix);
+                val.prefix_exp.right = &rightval;
+                return val;
+            },
+            else => @panic("no parse function found"),
         }
     }
 };
@@ -147,6 +160,35 @@ pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     p_ptr.nextToken();
     p_ptr.nextToken();
     return p_ptr;
+}
+test "Test prefix Expression" {
+    const input =
+        \\ -10;
+        \\!1;
+    ;
+    const testType = struct {
+        ip: []const u8,
+        op: []const u8,
+        intval: i64,
+    };
+
+    const tests: [2]testType = .{ testType{ .ip = "-10;", .op = "-", .intval = 10 }, testType{ .ip = "!10;", .op = "!", .intval = 10 } };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (program.statements.items, 0..) |stmt, index| {
+        const val = tests[index];
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        print("\n {s} ||| {s}\n", .{ str, val.op });
+        // try std.testing.expect(stmt.expression_stmt.expression == 10);
+    }
+    const a = ast.Expression{ .integer = ast.IntegerLiteral{ .value = 11 } };
+    print("\n {} lmao you are dumb af\n", .{a});
 }
 
 test "Test integer Expression" {
@@ -159,9 +201,13 @@ test "Test integer Expression" {
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
     for (program.statements.items) |stmt| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, str, "10"));
         try std.testing.expect(stmt.expression_stmt.expression.integer.value == 10);
     }
 }
+
 test "Test Expression" {
     const input = "rem;";
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -172,7 +218,9 @@ test "Test Expression" {
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
     for (program.statements.items) |stmt| {
-        try std.testing.expect(std.mem.eql(u8, stmt.expression_stmt.expression.identifier.name, "rem"));
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, str, "rem"));
     }
 }
 
@@ -193,11 +241,9 @@ test "Test let statements without expression" {
         "let ten = ;",
     };
     for (program.statements.items, 0..) |stmt, index| {
-        var str = std.ArrayList(u8).init(allocator);
-        defer str.deinit();
-        try stmt.string(&str);
-        const val = try str.toOwnedSlice();
-        try std.testing.expect(std.mem.eql(u8, strings[index], val));
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
     }
 }
 
