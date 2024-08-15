@@ -68,7 +68,7 @@ pub const PrefixExpression = struct {
     operator: token.tokens = undefined,
     right: *const Expression = undefined,
     pub fn format(self: PrefixExpression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.print("({}{})", .{ self.operator, @TypeOf(self.right) });
+        try writer.print("({}{})", .{ self.operator, self.right });
     }
 };
 

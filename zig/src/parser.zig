@@ -58,7 +58,7 @@ pub const Parser = struct {
         }
         return &program;
     }
-    pub fn parseStatement(self: *Self) ParserError!ast.Statement {
+    pub fn parseStatement(self: *Self) !ast.Statement {
         return switch (self.curToken) {
             .let => {
                 const letStmt = self.parseLetStatement() catch |err| return err;
@@ -74,7 +74,7 @@ pub const Parser = struct {
             },
         };
     }
-    pub fn parseReturnStatement(self: *Self) ParserError!ast.ReturnStatement {
+    pub fn parseReturnStatement(self: *Self) !ast.ReturnStatement {
         var stmt = ast.ReturnStatement{};
         //remove after handling expression
         stmt.value = undefined;
@@ -91,7 +91,7 @@ pub const Parser = struct {
         }
         return stmt;
     }
-    pub fn parseLetStatement(self: *Self) ParserError!ast.LetStatement {
+    pub fn parseLetStatement(self: *Self) !ast.LetStatement {
         var stmt = ast.LetStatement{};
 
         switch (self.peekToken) {
@@ -137,7 +137,6 @@ pub const Parser = struct {
                     std.debug.print("Error parsing int: {}\n", .{err});
                     return ParserError.parseIntError;
                 };
-                std.debug.print("{}\n", .{intVal});
                 return .{ .integer = ast.IntegerLiteral{ .value = intVal } };
             },
             .minus, .bang => {
@@ -145,8 +144,10 @@ pub const Parser = struct {
                     .prefix_exp = ast.PrefixExpression{ .operator = self.curToken },
                 };
                 self.nextToken();
-                const rightval = try self.parseExpression(Precedences.prefix);
-                val.prefix_exp.right = &rightval;
+                const exp = try self.allocator.create(ast.Expression);
+                defer self.allocator.destroy(exp);
+                exp.* = try self.parseExpression(Precedences.prefix);
+                val.prefix_exp.right = exp;
                 return val;
             },
             else => @panic("no parse function found"),
@@ -171,8 +172,10 @@ test "Test prefix Expression" {
         op: []const u8,
         intval: i64,
     };
-
-    const tests: [2]testType = .{ testType{ .ip = "-10;", .op = "-", .intval = 10 }, testType{ .ip = "!10;", .op = "!", .intval = 10 } };
+    const tests: [2]testType = .{
+        testType{ .ip = "(-10)", .op = "-", .intval = 10 },
+        testType{ .ip = "(!1)", .op = "!", .intval = 1 },
+    };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var allocator = arena.allocator();
@@ -183,12 +186,13 @@ test "Test prefix Expression" {
     for (program.statements.items, 0..) |stmt, index| {
         const val = tests[index];
         var buf: [256]u8 = undefined;
+        var buf2: [256]u8 = undefined;
         const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-        print("\n {s} ||| {s}\n", .{ str, val.op });
-        // try std.testing.expect(stmt.expression_stmt.expression == 10);
+        const opStr = try std.fmt.bufPrint(&buf2, "{}", .{stmt.expression_stmt.expression.prefix_exp.operator});
+        try std.testing.expect(std.mem.eql(u8, str, val.ip));
+        try std.testing.expect(std.mem.eql(u8, opStr, val.op));
+        try std.testing.expect(stmt.expression_stmt.expression.prefix_exp.right.integer.value == val.intval);
     }
-    const a = ast.Expression{ .integer = ast.IntegerLiteral{ .value = 11 } };
-    print("\n {} lmao you are dumb af\n", .{a});
 }
 
 test "Test integer Expression" {
