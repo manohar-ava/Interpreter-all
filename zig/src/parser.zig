@@ -3,12 +3,17 @@ const print = std.debug.print;
 const ast = @import("./abstract_syntax_tree.zig");
 const token = @import("./token.zig");
 const lexer = @import("./lexer.zig");
+const Precedences = token.Precedences;
+const tokens = token.tokens;
 
-const ParserError = error{ parseStatementIsUndefined, badStatement, expectedIdentifier, expectedAssign, parseIntError };
-
-const ParserFunctions = union(enum) { prefixFn: fn () ast.Expression, infixFn: fn (ast.Expression) ast.Expression };
-
-const Precedences = enum { lowest, equals, comparision, sum, product, prefix, call };
+const ParserError = error{
+    parseStatementIsUndefined,
+    badStatement,
+    expectedIdentifier,
+    expectedAssign,
+    parseIntError,
+    OutOfMemory,
+};
 
 pub fn dbg(stmt: ast.Statement) void {
     std.debug.print("{}\n", .{stmt});
@@ -18,8 +23,8 @@ pub const Parser = struct {
     const Self = @This();
     l: *lexer.Lexer,
     allocator: *std.mem.Allocator,
-    curToken: token.tokens = undefined,
-    peekToken: token.tokens = undefined,
+    curToken: tokens = undefined,
+    peekToken: tokens = undefined,
     pub fn nextToken(self: *Self) void {
         self.curToken = self.peekToken;
         self.peekToken = self.l.nextToken();
@@ -28,32 +33,25 @@ pub const Parser = struct {
         var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
         defer stmts.deinit();
         var program = ast.Program{ .statements = stmts };
-        while (true) {
-            switch (self.curToken) {
-                .eof => {
-                    break;
-                },
-                else => {
-                    const stmt = self.parseStatement() catch |err| {
-                        switch (err) {
-                            ParserError.expectedAssign => {
-                                print("{} expected assign found {}\n", .{ err, self.peekToken });
-                                @panic("parserError:");
-                            },
-                            ParserError.expectedIdentifier => {
-                                print("{} expected identifier found {}\n", .{ err, self.peekToken });
-                                @panic("parserError:");
-                            },
-                            ParserError.badStatement => {
-                                print("{} bad statement synatx \n", .{err});
-                                @panic("parserError:");
-                            },
-                            else => @panic("parserError: unknown"),
-                        }
-                    };
-                    try program.statements.append(stmt);
-                },
-            }
+        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.eof)) {
+            const stmt = self.parseStatement() catch |err| {
+                switch (err) {
+                    ParserError.expectedAssign => {
+                        print("{} expected assign found {}\n", .{ err, self.peekToken });
+                        @panic("parserError:");
+                    },
+                    ParserError.expectedIdentifier => {
+                        print("{} expected identifier found {}\n", .{ err, self.peekToken });
+                        @panic("parserError:");
+                    },
+                    ParserError.badStatement => {
+                        print("{} bad statement synatx \n", .{err});
+                        @panic("parserError:");
+                    },
+                    else => @panic("parserError: unknown"),
+                }
+            };
+            try program.statements.append(stmt);
             self.nextToken();
         }
         return &program;
@@ -62,96 +60,116 @@ pub const Parser = struct {
         return switch (self.curToken) {
             .let => {
                 const letStmt = self.parseLetStatement() catch |err| return err;
-                return .{ .let = letStmt };
+                return .{ .let = letStmt.* };
             },
             .return_stmt => {
                 const returnStatement = self.parseReturnStatement() catch |err| return err;
-                return .{ .return_stmt = returnStatement };
+                return .{ .return_stmt = returnStatement.* };
             },
             else => {
                 const expStmt = self.parseExpressionStatement() catch |err| return err;
-                return .{ .expression_stmt = expStmt };
+                return .{ .expression_stmt = expStmt.* };
             },
         };
     }
-    pub fn parseReturnStatement(self: *Self) !ast.ReturnStatement {
-        var stmt = ast.ReturnStatement{};
-        //remove after handling expression
-        stmt.value = undefined;
-        self.nextToken();
-        while (true) {
-            switch (self.curToken) {
-                .semicolon => {
-                    break;
-                },
-                else => {
-                    self.nextToken();
-                },
-            }
-        }
-        return stmt;
-    }
-    pub fn parseLetStatement(self: *Self) !ast.LetStatement {
-        var stmt = ast.LetStatement{};
 
+    pub fn parseReturnStatement(self: *Self) !*ast.ReturnStatement {
+        const returnStatement = try self.allocator.create(ast.ReturnStatement);
+        self.nextToken();
+        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon)) {
+            self.nextToken();
+        }
+        return returnStatement;
+    }
+
+    pub fn parseLetStatement(self: *Self) !*ast.LetStatement {
+        const letStmt = try self.allocator.create(ast.LetStatement);
+        letStmt.value = ast.Expression{ .identifier = ast.Identifier{ .name = "tempval" } };
         switch (self.peekToken) {
             .ident => |val| {
                 self.nextToken();
-                stmt.identifier = ast.Identifier{ .name = val };
+                letStmt.identifier = ast.Identifier{
+                    .name = val,
+                };
             },
             else => return ParserError.expectedIdentifier,
         }
-        switch (self.peekToken) {
-            .assign => {
-                self.nextToken();
-            },
-            else => return ParserError.expectedAssign,
-        }
-        while (true) {
-            switch (self.curToken) {
-                .semicolon => {
-                    break;
-                },
-                else => {
-                    self.nextToken();
-                },
-            }
-        }
-        return stmt;
-    }
-    pub fn parseExpressionStatement(self: *Self) !ast.ExpressionStatement {
-        var stmt = ast.ExpressionStatement{ .token = self.curToken };
-        stmt.expression = try self.parseExpression(Precedences.lowest);
-        if (@intFromEnum(self.peekToken) == @intFromEnum(token.tokens.semicolon)) {
+
+        if (@intFromEnum(self.peekToken) == @intFromEnum(tokens.assign)) {
             self.nextToken();
         }
-        return stmt;
+        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon)) {
+            self.nextToken();
+        }
+        return letStmt;
     }
-    pub fn parseExpression(self: *Self, _: Precedences) !ast.Expression {
-        switch (self.curToken) {
-            .ident => |val| {
-                return .{ .identifier = ast.Identifier{ .name = val } };
-            },
+    pub fn parseExpressionStatement(self: *Self) !*ast.ExpressionStatement {
+        const expStmt = try self.allocator.create(ast.ExpressionStatement);
+        expStmt.expression = try self.parseExpression(Precedences.lowest.intVal());
+        if (@intFromEnum(self.peekToken) == @intFromEnum(tokens.semicolon)) {
+            self.nextToken();
+        }
+        return expStmt;
+    }
+    pub fn parseExpression(self: *Self, precedence: i32) ParserError!ast.Expression {
+        var exp: ast.Expression = undefined;
+        if (self.curToken.isPrefix()) {
+            exp = try self.parsePrefixExpression();
+        }
+
+        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon) and
+            precedence < self.peekToken.precedence())
+        {
+            self.nextToken();
+            exp = try self.parseInfixExpression(exp);
+        }
+        return exp;
+    }
+    fn parsePrefixExpression(self: *Self) !ast.Expression {
+        return switch (self.curToken) {
+            .ident => |val| ast.Expression{ .identifier = ast.Identifier{ .name = val } },
             .int => |val| {
                 const intVal = std.fmt.parseInt(i64, val, 10) catch |err| {
                     std.debug.print("Error parsing int: {}\n", .{err});
                     return ParserError.parseIntError;
                 };
-                return .{ .integer = ast.IntegerLiteral{ .value = intVal } };
+                const intExp = .{ .integer = ast.IntegerLiteral{ .value = intVal } };
+                return intExp;
             },
             .minus, .bang => {
-                var val = .{
-                    .prefix_exp = ast.PrefixExpression{ .operator = self.curToken },
-                };
+                const prefixExp = try self.allocator.create(ast.PrefixExpression);
+                const op = self.curToken;
                 self.nextToken();
-                const exp = try self.allocator.create(ast.Expression);
-                defer self.allocator.destroy(exp);
-                exp.* = try self.parseExpression(Precedences.prefix);
-                val.prefix_exp.right = exp;
-                return val;
+                const rightExp = try self.allocator.create(ast.Expression);
+                rightExp.* = try self.parseExpression(Precedences.prefix.intVal());
+
+                prefixExp.* = ast.PrefixExpression{ .operator = op, .right = rightExp };
+
+                return ast.Expression{ .prefix_exp = prefixExp.* };
             },
-            else => @panic("no parse function found"),
-        }
+            else => @panic("prefix exp parsing"),
+        };
+    }
+    fn parseInfixExpression(self: *Self, leftExp: ast.Expression) !ast.Expression {
+        return switch (self.curToken) {
+            .minus, .plus, .slash, .asterisk, .equal_to, .not_equal_to, .greaterThan, .lesserThan => {
+                const infixExp = try self.allocator.create(ast.InfixExpression);
+                const infixPrecedence = self.curToken.precedence();
+                const op = self.curToken;
+                self.nextToken();
+                const rightExp = try self.allocator.create(ast.Expression);
+                rightExp.* = try self.parseExpression(infixPrecedence);
+                const left = try self.allocator.create(ast.Expression);
+                left.* = leftExp;
+                infixExp.* = ast.InfixExpression{
+                    .operator = op,
+                    .left = left,
+                    .right = rightExp,
+                };
+                return ast.Expression{ .infix_exp = infixExp.* };
+            },
+            else => @panic("infix exp parsing"),
+        };
     }
 };
 
@@ -162,6 +180,53 @@ pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     p_ptr.nextToken();
     return p_ptr;
 }
+
+test "Test infix  Expression" {
+    const input =
+        \\5 + 5;
+        \\5 - 5;
+        \\5 * 5;
+        \\5 / 5;
+        \\5 > 5;
+        \\5 < 5;
+        \\5 == 5;
+        \\5 != 5;
+    ;
+    const testType = struct {
+        ip: []const u8,
+        op: []const u8,
+        right: i64 = 5,
+        left: i64 = 5,
+    };
+    const tests: [8]testType = .{
+        testType{ .ip = "(5 + 5)", .op = "+" },
+        testType{ .ip = "(5 - 5)", .op = "-" },
+        testType{ .ip = "(5 * 5)", .op = "*" },
+        testType{ .ip = "(5 / 5)", .op = "/" },
+        testType{ .ip = "(5 > 5)", .op = ">" },
+        testType{ .ip = "(5 < 5)", .op = "<" },
+        testType{ .ip = "(5 == 5)", .op = "==" },
+        testType{ .ip = "(5 != 5)", .op = "!=" },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (program.statements.items, 0..) |stmt, index| {
+        const val = tests[index];
+        var buf: [256]u8 = undefined;
+        var buf2: [256]u8 = undefined;
+        const opStr = try std.fmt.bufPrint(&buf2, "{}", .{stmt.expression_stmt.expression.infix_exp.operator});
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, str, val.ip));
+        try std.testing.expect(std.mem.eql(u8, opStr, val.op));
+        try std.testing.expect(stmt.expression_stmt.expression.infix_exp.right.integer.value == val.right);
+        try std.testing.expect(stmt.expression_stmt.expression.infix_exp.left.integer.value == val.left);
+    }
+}
+
 test "Test prefix Expression" {
     const input =
         \\ -10;
@@ -240,9 +305,10 @@ test "Test let statements without expression" {
     defer allocator.destroy(lex);
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
+    //todo adjust this when implementing exp for let and return stmt
     const strings: [2][]const u8 = .{
-        "let five = ;",
-        "let ten = ;",
+        "let five = tempval;",
+        "let ten = tempval;",
     };
     for (program.statements.items, 0..) |stmt, index| {
         var buf: [256]u8 = undefined;

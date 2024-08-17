@@ -1,4 +1,24 @@
 const std = @import("std");
+pub const Precedences = enum {
+    lowest,
+    equals,
+    comparision,
+    sum,
+    product,
+    prefix,
+    call,
+    pub fn intVal(self: Precedences) i32 {
+        return switch (self) {
+            .lowest => @intFromEnum(Precedences.lowest),
+            .equals => @intFromEnum(Precedences.equals),
+            .comparision => @intFromEnum(Precedences.comparision),
+            .sum => @intFromEnum(Precedences.sum),
+            .product => @intFromEnum(Precedences.product),
+            .prefix => @intFromEnum(Precedences.prefix),
+            .call => @intFromEnum(Precedences.call),
+        };
+    }
+};
 pub const tokens = union(enum) {
     ident: []const u8,
     int: []const u8,
@@ -34,8 +54,32 @@ pub const tokens = union(enum) {
             .bang => try writer.writeByte('!'),
             .asterisk => try writer.writeByte('*'),
             .slash => try writer.writeByte('/'),
+            .lesserThan => try writer.writeByte('<'),
+            .greaterThan => try writer.writeByte('>'),
+            .not_equal_to => try writer.writeAll("!="),
+            .equal_to => try writer.writeAll("=="),
+            // .ident, .int => |val| try writer.writeAll(val),
             else => {},
         }
+    }
+    pub fn precedence(self: tokens) i32 {
+        return switch (self) {
+            .equal_to => Precedences.equals.intVal(),
+            .not_equal_to => Precedences.equals.intVal(),
+            .lesserThan => Precedences.comparision.intVal(),
+            .greaterThan => Precedences.comparision.intVal(),
+            .plus => Precedences.sum.intVal(),
+            .minus => Precedences.sum.intVal(),
+            .slash => Precedences.product.intVal(),
+            .asterisk => Precedences.product.intVal(),
+            else => Precedences.lowest.intVal(),
+        };
+    }
+    pub fn isPrefix(self: tokens) bool {
+        return switch (self) {
+            .int, .ident, .minus, .bang => true,
+            else => false,
+        };
     }
 };
 
