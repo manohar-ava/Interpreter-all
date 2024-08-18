@@ -84,4 +84,9 @@ pub const InfixExpression = struct {
 
 pub const Program = struct {
     statements: std.ArrayList(Statement),
+    pub fn format(self: Program, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        for (self.statements.items) |stmt| {
+            try writer.print("{}\n", .{stmt});
+        }
+    }
 };

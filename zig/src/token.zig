@@ -58,7 +58,8 @@ pub const tokens = union(enum) {
             .greaterThan => try writer.writeByte('>'),
             .not_equal_to => try writer.writeAll("!="),
             .equal_to => try writer.writeAll("=="),
-            // .ident, .int => |val| try writer.writeAll(val),
+            .ident, .int => |val| try writer.writeAll(val),
+            .semicolon => try writer.writeByte(';'),
             else => {},
         }
     }

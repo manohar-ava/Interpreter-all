@@ -112,11 +112,21 @@ pub const Parser = struct {
         return expStmt;
     }
     pub fn parseExpression(self: *Self, precedence: i32) ParserError!ast.Expression {
+        // std.debug.print("cur:{} peek:{} isCurPrexix:{}\n", .{
+        //     self.curToken,
+        //     self.peekToken,
+        //     self.curToken.isPrefix(),
+        // });
         var exp: ast.Expression = undefined;
         if (self.curToken.isPrefix()) {
             exp = try self.parsePrefixExpression();
         }
-
+        // std.debug.print("({}!={}) and ({}<{})\n", .{
+        //     @intFromEnum(self.curToken),
+        //     @intFromEnum(tokens.semicolon),
+        //     precedence,
+        //     self.peekToken.precedence(),
+        // });
         while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon) and
             precedence < self.peekToken.precedence())
         {
@@ -181,6 +191,113 @@ pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     return p_ptr;
 }
 
+test "Test let statements without expression" {
+    const input =
+        \\let five = ten;
+        \\let ten = five;
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    //todo adjust this when implementing exp for let and return stmt
+    const strings: [2][]const u8 = .{
+        "let five = tempval;",
+        "let ten = tempval;",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
+    }
+}
+
+test "Test return statements" {
+    const input =
+        \\return 100;
+        \\return 9;
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (0..2) |index| {
+        const stmt = program.statements.items[index];
+        try std.testing.expect(@TypeOf(stmt.return_stmt) == ast.ReturnStatement);
+    }
+}
+test "Test Expression" {
+    const input = "rem;";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (program.statements.items) |stmt| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, str, "rem"));
+    }
+}
+
+test "Test integer Expression" {
+    const input = "10;";
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (program.statements.items) |stmt| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, str, "10"));
+        try std.testing.expect(stmt.expression_stmt.expression.integer.value == 10);
+    }
+}
+
+test "Test prefix Expression" {
+    const input =
+        \\ -10;
+        \\!1;
+    ;
+    const testType = struct {
+        ip: []const u8,
+        op: []const u8,
+        intval: i64,
+    };
+    const tests: [2]testType = .{
+        testType{ .ip = "(-10)", .op = "-", .intval = 10 },
+        testType{ .ip = "(!1)", .op = "!", .intval = 1 },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    for (program.statements.items, 0..) |stmt, index| {
+        const val = tests[index];
+        var buf: [256]u8 = undefined;
+        var buf2: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        const opStr = try std.fmt.bufPrint(&buf2, "{}", .{stmt.expression_stmt.expression.prefix_exp.operator});
+        try std.testing.expect(std.mem.eql(u8, str, val.ip));
+        try std.testing.expect(std.mem.eql(u8, opStr, val.op));
+        try std.testing.expect(stmt.expression_stmt.expression.prefix_exp.right.integer.value == val.intval);
+    }
+}
+
 test "Test infix  Expression" {
     const input =
         \\5 + 5;
@@ -227,76 +344,20 @@ test "Test infix  Expression" {
     }
 }
 
-test "Test prefix Expression" {
+test "test a lot of expression combos" {
     const input =
-        \\ -10;
-        \\!1;
-    ;
-    const testType = struct {
-        ip: []const u8,
-        op: []const u8,
-        intval: i64,
-    };
-    const tests: [2]testType = .{
-        testType{ .ip = "(-10)", .op = "-", .intval = 10 },
-        testType{ .ip = "(!1)", .op = "!", .intval = 1 },
-    };
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var allocator = arena.allocator();
-    const lex = try lexer.newLexer(&allocator, input);
-    defer allocator.destroy(lex);
-    var parser = try newParser(&allocator, lex);
-    const program = try parser.parse();
-    for (program.statements.items, 0..) |stmt, index| {
-        const val = tests[index];
-        var buf: [256]u8 = undefined;
-        var buf2: [256]u8 = undefined;
-        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-        const opStr = try std.fmt.bufPrint(&buf2, "{}", .{stmt.expression_stmt.expression.prefix_exp.operator});
-        try std.testing.expect(std.mem.eql(u8, str, val.ip));
-        try std.testing.expect(std.mem.eql(u8, opStr, val.op));
-        try std.testing.expect(stmt.expression_stmt.expression.prefix_exp.right.integer.value == val.intval);
-    }
-}
-
-test "Test integer Expression" {
-    const input = "10;";
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var allocator = arena.allocator();
-    const lex = try lexer.newLexer(&allocator, input);
-    defer allocator.destroy(lex);
-    var parser = try newParser(&allocator, lex);
-    const program = try parser.parse();
-    for (program.statements.items) |stmt| {
-        var buf: [256]u8 = undefined;
-        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-        try std.testing.expect(std.mem.eql(u8, str, "10"));
-        try std.testing.expect(stmt.expression_stmt.expression.integer.value == 10);
-    }
-}
-
-test "Test Expression" {
-    const input = "rem;";
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var allocator = arena.allocator();
-    const lex = try lexer.newLexer(&allocator, input);
-    defer allocator.destroy(lex);
-    var parser = try newParser(&allocator, lex);
-    const program = try parser.parse();
-    for (program.statements.items) |stmt| {
-        var buf: [256]u8 = undefined;
-        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-        try std.testing.expect(std.mem.eql(u8, str, "rem"));
-    }
-}
-
-test "Test let statements without expression" {
-    const input =
-        \\let five = ten;
-        \\let ten = five;
+        \\!-a;
+        \\a + b + c;
+        \\a + b - c;
+        \\a * b * c;
+        \\a * b / c;
+        \\a + b / c;
+        \\a + b * c + d / e - f;
+        \\3 + 4;-5 * 5;
+        \\5 > 4 == 3 < 4;
+        \\5 < 4 != 3 > 4;
+        \\3 + 4 * 5 == 3 * 1 + 4 * 5;
+        \\3 + 4 * 5 == 3 * 1 + 4 * 5;
     ;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -305,32 +366,24 @@ test "Test let statements without expression" {
     defer allocator.destroy(lex);
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
-    //todo adjust this when implementing exp for let and return stmt
-    const strings: [2][]const u8 = .{
-        "let five = tempval;",
-        "let ten = tempval;",
+    const strings: [13][]const u8 = .{
+        "(!(-a))",
+        "((a + b) + c)",
+        "((a + b) - c)",
+        "((a * b) * c)",
+        "((a * b) / c)",
+        "(a + (b / c))",
+        "(((a + (b * c)) + (d / e)) - f)",
+        "(3 + 4)",
+        "((-5) * 5)",
+        "((5 > 4) == (3 < 4))",
+        "((5 < 4) != (3 > 4))",
+        "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+        "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
     };
     for (program.statements.items, 0..) |stmt, index| {
         var buf: [256]u8 = undefined;
         const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
         try std.testing.expect(std.mem.eql(u8, strings[index], str));
-    }
-}
-
-test "Test return statements" {
-    const input =
-        \\return 100;
-        \\return 9;
-    ;
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var allocator = arena.allocator();
-    const lex = try lexer.newLexer(&allocator, input);
-    defer allocator.destroy(lex);
-    var parser = try newParser(&allocator, lex);
-    const program = try parser.parse();
-    for (0..2) |index| {
-        const stmt = program.statements.items[index];
-        try std.testing.expect(@TypeOf(stmt.return_stmt) == ast.ReturnStatement);
     }
 }
