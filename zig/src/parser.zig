@@ -13,6 +13,7 @@ const ParserError = error{
     expectedAssign,
     parseIntError,
     OutOfMemory,
+    missingRightParentheses,
 };
 
 pub fn dbg(stmt: ast.Statement) void {
@@ -29,11 +30,17 @@ pub const Parser = struct {
         self.curToken = self.peekToken;
         self.peekToken = self.l.nextToken();
     }
+    fn isPeekToken(self: *Self, tok: tokens) bool {
+        return @intFromEnum(self.peekToken) == @intFromEnum(tok);
+    }
+    fn isCurToken(self: *Self, tok: tokens) bool {
+        return @intFromEnum(self.curToken) == @intFromEnum(tok);
+    }
     pub fn parse(self: *Self) !*ast.Program {
         var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
         defer stmts.deinit();
         var program = ast.Program{ .statements = stmts };
-        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.eof)) {
+        while (!self.isCurToken(tokens.eof)) {
             const stmt = self.parseStatement() catch |err| {
                 switch (err) {
                     ParserError.expectedAssign => {
@@ -76,7 +83,7 @@ pub const Parser = struct {
     pub fn parseReturnStatement(self: *Self) !*ast.ReturnStatement {
         const returnStatement = try self.allocator.create(ast.ReturnStatement);
         self.nextToken();
-        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon)) {
+        while (!self.isCurToken(tokens.semicolon)) {
             self.nextToken();
         }
         return returnStatement;
@@ -95,10 +102,10 @@ pub const Parser = struct {
             else => return ParserError.expectedIdentifier,
         }
 
-        if (@intFromEnum(self.peekToken) == @intFromEnum(tokens.assign)) {
+        if (self.isPeekToken(tokens.assign)) {
             self.nextToken();
         }
-        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon)) {
+        while (!self.isCurToken(tokens.semicolon)) {
             self.nextToken();
         }
         return letStmt;
@@ -106,7 +113,7 @@ pub const Parser = struct {
     pub fn parseExpressionStatement(self: *Self) !*ast.ExpressionStatement {
         const expStmt = try self.allocator.create(ast.ExpressionStatement);
         expStmt.expression = try self.parseExpression(Precedences.lowest.intVal());
-        if (@intFromEnum(self.peekToken) == @intFromEnum(tokens.semicolon)) {
+        if (self.isPeekToken(tokens.semicolon)) {
             self.nextToken();
         }
         return expStmt;
@@ -121,13 +128,13 @@ pub const Parser = struct {
         if (self.curToken.isPrefix()) {
             exp = try self.parsePrefixExpression();
         }
-        // std.debug.print("({}!={}) and ({}<{})\n", .{
+        // std.debug.print("({}!={}) and ({}<{}) \n", .{
         //     @intFromEnum(self.curToken),
         //     @intFromEnum(tokens.semicolon),
         //     precedence,
         //     self.peekToken.precedence(),
         // });
-        while (@intFromEnum(self.curToken) != @intFromEnum(tokens.semicolon) and
+        while (!self.isCurToken(tokens.semicolon) and
             precedence < self.peekToken.precedence())
         {
             self.nextToken();
@@ -138,6 +145,9 @@ pub const Parser = struct {
     fn parsePrefixExpression(self: *Self) !ast.Expression {
         return switch (self.curToken) {
             .ident => |val| ast.Expression{ .identifier = ast.Identifier{ .name = val } },
+            .bool_true, .bool_false => ast.Expression{
+                .boolean_exp = ast.BooleanExpression{ .value = self.isCurToken(tokens.bool_true) },
+            },
             .int => |val| {
                 const intVal = std.fmt.parseInt(i64, val, 10) catch |err| {
                     std.debug.print("Error parsing int: {}\n", .{err});
@@ -156,6 +166,57 @@ pub const Parser = struct {
                 prefixExp.* = ast.PrefixExpression{ .operator = op, .right = rightExp };
 
                 return ast.Expression{ .prefix_exp = prefixExp.* };
+            },
+            .lparen => {
+                self.nextToken();
+                const exp = try self.allocator.create(ast.Expression);
+                exp.* = try self.parseExpression(Precedences.lowest.intVal());
+                if (!self.isPeekToken(tokens.rparen)) {
+                    return ParserError.missingRightParentheses;
+                }
+                self.nextToken();
+                return exp.*;
+            },
+            .if_stmt => {
+                const ifExp = try self.allocator.create(ast.IfExpression);
+                if (!self.isPeekToken(tokens.lparen)) {
+                    @panic("no left parentheses in if");
+                }
+                self.nextToken();
+                self.nextToken();
+                const conditionExp = try self.allocator.create(ast.Expression);
+                conditionExp.* = try self.parseExpression(Precedences.lowest.intVal());
+                if (!self.isPeekToken(tokens.rparen)) {
+                    @panic("no right parentheses in if");
+                }
+                self.nextToken();
+                if (!self.isPeekToken(tokens.lbrace)) {
+                    @panic("no left brace in if");
+                }
+                self.nextToken();
+
+                const ifConsequence = try self.allocator.create(ast.BlockStatement);
+                ifConsequence.* = try self.parseBlockStatement();
+
+                ifExp.* = ast.IfExpression{
+                    .condition = conditionExp,
+                    .consequence = ifConsequence,
+                    .alternative = null,
+                };
+
+                if (self.isPeekToken(tokens.else_stmt)) {
+                    self.nextToken();
+
+                    if (!self.isPeekToken(tokens.lbrace)) {
+                        @panic("no left brace in if");
+                    }
+                    self.nextToken();
+                    const ifAlternative = try self.allocator.create(ast.BlockStatement);
+                    ifAlternative.* = try self.parseBlockStatement();
+                    ifExp.alternative = ifAlternative;
+                }
+
+                return ast.Expression{ .if_exp = ifExp.* };
             },
             else => @panic("prefix exp parsing"),
         };
@@ -181,6 +242,16 @@ pub const Parser = struct {
             else => @panic("infix exp parsing"),
         };
     }
+    fn parseBlockStatement(self: *Self) !ast.BlockStatement {
+        var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
+        self.nextToken();
+        while (!self.isCurToken(tokens.rbrace) and !self.isCurToken(tokens.eof)) {
+            const parsedStmt = try self.parseStatement();
+            try stmts.append(parsedStmt);
+            self.nextToken();
+        }
+        return ast.BlockStatement{ .statements = stmts };
+    }
 };
 
 pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
@@ -189,6 +260,49 @@ pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     p_ptr.nextToken();
     p_ptr.nextToken();
     return p_ptr;
+}
+test "test if-else expression" {
+    const input =
+        \\if (a > b) { x };
+        \\if (a > b) { x } else { z };
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    const strings: [2][]const u8 = .{
+        "if(a > b) { x }",
+        "if(a > b) { x } else { z }",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
+    }
+}
+
+test "test grouped expression" {
+    const input =
+        \\1 + (2 + 3) + 4;
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    const strings: [1][]const u8 = .{
+        "((1 + (2 + 3)) + 4)",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
+    }
 }
 
 test "Test let statements without expression" {
@@ -380,6 +494,45 @@ test "test a lot of expression combos" {
         "((5 < 4) != (3 > 4))",
         "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
         "((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
+    }
+}
+
+test "test boolean expression" {
+    const input =
+        \\true;
+        \\!true
+        \\false;
+        \\!false;
+        \\true == true;
+        \\false != true;
+        \\false == false;
+        \\3 < 4 == true;
+        \\4 > 10 == false;
+        \\1 != 1 == false;
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    const strings: [10][]const u8 = .{
+        "true",
+        "(!true)",
+        "false",
+        "(!false)",
+        "(true == true)",
+        "(false != true)",
+        "(false == false)",
+        "((3 < 4) == true)",
+        "((4 > 10) == false)",
+        "((1 != 1) == false)",
     };
     for (program.statements.items, 0..) |stmt, index| {
         var buf: [256]u8 = undefined;
