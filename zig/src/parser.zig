@@ -144,7 +144,7 @@ pub const Parser = struct {
     }
     fn parsePrefixExpression(self: *Self) !ast.Expression {
         return switch (self.curToken) {
-            .ident => |val| ast.Expression{ .identifier = ast.Identifier{ .name = val } },
+            .ident => ast.Expression{ .identifier = ast.Identifier{ .name = self.curToken.getIdentValue() } },
             .bool_true, .bool_false => ast.Expression{
                 .boolean_exp = ast.BooleanExpression{ .value = self.isCurToken(tokens.bool_true) },
             },
@@ -218,6 +218,25 @@ pub const Parser = struct {
 
                 return ast.Expression{ .if_exp = ifExp.* };
             },
+            .function => {
+                const func = try self.allocator.create(ast.FunctionLiteral);
+                func.token = self.curToken;
+                if (!self.isPeekToken(tokens.lparen)) {
+                    @panic("no left parentheses in function literal");
+                }
+                self.nextToken();
+                const parameters = try self.parseFunctionParameters();
+                func.parameters = parameters;
+                if (!self.isPeekToken(tokens.lbrace)) {
+                    @panic("no left brace in function literal");
+                }
+                self.nextToken();
+                const body = try self.allocator.create(ast.BlockStatement);
+                body.* = try self.parseBlockStatement();
+
+                func.body = body;
+                return ast.Expression{ .fn_literal = func.* };
+            },
             else => @panic("prefix exp parsing"),
         };
     }
@@ -252,6 +271,25 @@ pub const Parser = struct {
         }
         return ast.BlockStatement{ .statements = stmts };
     }
+    fn parseFunctionParameters(self: *Self) !std.ArrayList(ast.Identifier) {
+        var params = std.ArrayList(ast.Identifier).init(self.allocator.*);
+        if (self.isPeekToken(tokens.rparen)) {
+            self.nextToken();
+            return params;
+        }
+        self.nextToken();
+        try params.append(ast.Identifier{ .name = self.curToken.getIdentValue() });
+        while (self.isPeekToken(tokens.comma)) {
+            self.nextToken(); // jump current ident
+            self.nextToken(); // jump comma
+            try params.append(ast.Identifier{ .name = self.curToken.getIdentValue() });
+        }
+        if (!self.isPeekToken(tokens.rparen)) {
+            @panic("no right parentheses in function literal parameters func");
+        }
+        self.nextToken();
+        return params;
+    }
 };
 
 pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
@@ -261,6 +299,31 @@ pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     p_ptr.nextToken();
     return p_ptr;
 }
+test "test function literal" {
+    const input =
+        \\func(a) { x };
+        \\func(a,b) { x + y };
+        \\func(a,b,c) { true == true };
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const lex = try lexer.newLexer(&allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try newParser(&allocator, lex);
+    const program = try parser.parse();
+    const strings: [3][]const u8 = .{
+        "func(a){x}",
+        "func(a,b){(x + y)}",
+        "func(a,b,c){(true == true)}",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
+    }
+}
+
 test "test if-else expression" {
     const input =
         \\if (a > b) { x };
@@ -274,8 +337,8 @@ test "test if-else expression" {
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
     const strings: [2][]const u8 = .{
-        "if(a > b) { x }",
-        "if(a > b) { x } else { z }",
+        "if(a > b) {x}",
+        "if(a > b) {x} else {z}",
     };
     for (program.statements.items, 0..) |stmt, index| {
         var buf: [256]u8 = undefined;

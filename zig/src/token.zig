@@ -68,6 +68,7 @@ pub const tokens = union(enum) {
             .rbrace => try writer.writeByte('}'),
             .if_stmt => try writer.writeAll("if"),
             .else_stmt => try writer.writeAll("else"),
+            .function => try writer.writeAll("func"),
             else => {},
         }
     }
@@ -86,8 +87,14 @@ pub const tokens = union(enum) {
     }
     pub fn isPrefix(self: tokens) bool {
         return switch (self) {
-            .int, .ident, .minus, .bang, .bool_true, .bool_false, .lparen, .if_stmt => true,
+            .int, .ident, .minus, .bang, .bool_true, .bool_false, .lparen, .if_stmt, .function => true,
             else => false,
+        };
+    }
+    pub fn getIdentValue(self: tokens) []const u8 {
+        return switch (self) {
+            .ident => |val| val,
+            else => "",
         };
     }
 };

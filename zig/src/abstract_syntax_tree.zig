@@ -21,6 +21,7 @@ pub const Expression = union(enum) {
     infix_exp: InfixExpression,
     boolean_exp: BooleanExpression,
     if_exp: IfExpression,
+    fn_literal: FunctionLiteral,
     pub fn format(self: Expression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
@@ -106,11 +107,28 @@ pub const IfExpression = struct {
 pub const BlockStatement = struct {
     statements: std.ArrayList(Statement),
     pub fn format(self: BlockStatement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.writeAll("{ ");
+        try writer.writeAll("{");
         for (self.statements.items) |stmt| {
             try writer.print("{}", .{stmt});
         }
-        try writer.writeAll(" }");
+        try writer.writeAll("}");
+    }
+};
+
+pub const FunctionLiteral = struct {
+    token: token.tokens,
+    parameters: std.ArrayList(Identifier),
+    body: *const BlockStatement,
+    pub fn format(self: FunctionLiteral, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{}(", .{self.token});
+        for (self.parameters.items, 1..) |stmt, index| {
+            if (index == self.parameters.items.len) {
+                try writer.print("{})", .{stmt});
+            } else {
+                try writer.print("{},", .{stmt});
+            }
+        }
+        try writer.print("{}", .{self.body});
     }
 };
 
