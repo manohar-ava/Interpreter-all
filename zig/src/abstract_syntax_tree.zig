@@ -7,7 +7,6 @@ pub const Statement = union(enum) {
     expression_stmt: ExpressionStatement,
     block_stmt: BlockStatement,
     pub fn format(self: Statement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        std.log.info("{}", .{@TypeOf(self)});
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
         }
@@ -22,6 +21,7 @@ pub const Expression = union(enum) {
     boolean_exp: BooleanExpression,
     if_exp: IfExpression,
     fn_literal: FunctionLiteral,
+    call_exp: CallExpressin,
     pub fn format(self: Expression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
@@ -38,7 +38,7 @@ pub const LetStatement = struct {
         _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        try writer.print("let {} = {};", .{ self.identifier, self.value });
+        try writer.print("let {} = {}", .{ self.identifier, self.value });
     }
 };
 
@@ -129,6 +129,21 @@ pub const FunctionLiteral = struct {
             }
         }
         try writer.print("{}", .{self.body});
+    }
+};
+
+pub const CallExpressin = struct {
+    function: *const Expression,
+    arguments: std.ArrayList(Expression),
+    pub fn format(self: CallExpressin, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{}(", .{self.function});
+        for (self.arguments.items, 1..) |stmt, index| {
+            if (index == self.arguments.items.len) {
+                try writer.print("{})", .{stmt});
+            } else {
+                try writer.print("{},", .{stmt});
+            }
+        }
     }
 };
 

@@ -1,5 +1,6 @@
 const std = @import("std");
 const lexer = @import("./lexer.zig");
+const Parser = @import("./parser.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
@@ -11,25 +12,18 @@ pub fn main() !void {
     try stdout.print(">>", .{});
     try bw.flush();
     var buffer: [512]u8 = undefined;
-    while (try stdin_file.readUntilDelimiterOrEof(&buffer, '\n')) |line| repl: {
-        var l = lexer.newLexer(line);
-        while (l.hasTokens()) {
-            const tok = l.nextToken();
-            switch (tok) {
-                .ident, .int => |value| {
-                    try stdout.print("{} | value = {s}\n", .{ tok, value });
-                    try bw.flush();
-                },
-                .illegal => {
-                    try stdout.print("Illegal token, Please exit using CTRL+D \n", .{});
-                    try bw.flush();
-                    break :repl;
-                },
-                else => {
-                    try stdout.print("{any}\n", .{tok});
-                    try bw.flush();
-                },
-            }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    while (try stdin_file.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
+        const lex = try lexer.newLexer(&allocator, line);
+        defer allocator.destroy(lex);
+        var parser = try Parser.newParser(&allocator, lex);
+        const program = try parser.parse();
+        for (program.statements.items) |stmt| {
+            var buf: [256]u8 = undefined;
+            const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+            try stdout.print("{s}\n", .{str});
         }
         try stdout.print(">>", .{});
         try bw.flush();

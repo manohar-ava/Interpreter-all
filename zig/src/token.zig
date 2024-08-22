@@ -69,6 +69,7 @@ pub const tokens = union(enum) {
             .if_stmt => try writer.writeAll("if"),
             .else_stmt => try writer.writeAll("else"),
             .function => try writer.writeAll("func"),
+            .assign => try writer.writeByte('='),
             else => {},
         }
     }
@@ -82,6 +83,7 @@ pub const tokens = union(enum) {
             .minus => Precedences.sum.intVal(),
             .slash => Precedences.product.intVal(),
             .asterisk => Precedences.product.intVal(),
+            .lparen => Precedences.call.intVal(),
             else => Precedences.lowest.intVal(),
         };
     }

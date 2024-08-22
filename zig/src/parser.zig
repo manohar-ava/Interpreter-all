@@ -83,7 +83,8 @@ pub const Parser = struct {
     pub fn parseReturnStatement(self: *Self) !*ast.ReturnStatement {
         const returnStatement = try self.allocator.create(ast.ReturnStatement);
         self.nextToken();
-        while (!self.isCurToken(tokens.semicolon)) {
+        returnStatement.value = try self.parseExpression(Precedences.lowest.intVal());
+        if (self.isPeekToken(tokens.semicolon)) {
             self.nextToken();
         }
         return returnStatement;
@@ -91,7 +92,6 @@ pub const Parser = struct {
 
     pub fn parseLetStatement(self: *Self) !*ast.LetStatement {
         const letStmt = try self.allocator.create(ast.LetStatement);
-        letStmt.value = ast.Expression{ .identifier = ast.Identifier{ .name = "tempval" } };
         switch (self.peekToken) {
             .ident => |val| {
                 self.nextToken();
@@ -101,11 +101,13 @@ pub const Parser = struct {
             },
             else => return ParserError.expectedIdentifier,
         }
-
-        if (self.isPeekToken(tokens.assign)) {
-            self.nextToken();
+        if (!self.isPeekToken(tokens.assign)) {
+            @panic("expected = but got something else parseLetStatement");
         }
-        while (!self.isCurToken(tokens.semicolon)) {
+        self.nextToken(); // jump to =
+        self.nextToken(); // jump to expression token
+        letStmt.value = try self.parseExpression(Precedences.lowest.intVal());
+        if (self.isPeekToken(tokens.semicolon)) {
             self.nextToken();
         }
         return letStmt;
@@ -258,6 +260,14 @@ pub const Parser = struct {
                 };
                 return ast.Expression{ .infix_exp = infixExp.* };
             },
+            .lparen => {
+                const callExpression = try self.allocator.create(ast.CallExpressin);
+                const function = try self.allocator.create(ast.Expression);
+                function.* = leftExp;
+                callExpression.arguments = try self.parseArguments();
+                callExpression.function = function;
+                return ast.Expression{ .call_exp = callExpression.* };
+            },
             else => @panic("infix exp parsing"),
         };
     }
@@ -289,6 +299,25 @@ pub const Parser = struct {
         }
         self.nextToken();
         return params;
+    }
+    fn parseArguments(self: *Self) !std.ArrayList(ast.Expression) {
+        var args = std.ArrayList(ast.Expression).init(self.allocator.*);
+        if (self.isPeekToken(tokens.rparen)) {
+            self.nextToken();
+            return args;
+        }
+        self.nextToken();
+        try args.append(try self.parseExpression(Precedences.lowest.intVal()));
+        while (self.isPeekToken(tokens.comma)) {
+            self.nextToken(); // jump current ident
+            self.nextToken(); // jump comma
+            try args.append(try self.parseExpression(Precedences.lowest.intVal()));
+        }
+        if (!self.isPeekToken(tokens.rparen)) {
+            @panic("no right parentheses in call expression parseArguments func");
+        }
+        self.nextToken();
+        return args;
     }
 };
 
@@ -368,7 +397,7 @@ test "test grouped expression" {
     }
 }
 
-test "Test let statements without expression" {
+test "Test let statements with expression" {
     const input =
         \\let five = ten;
         \\let ten = five;
@@ -380,10 +409,9 @@ test "Test let statements without expression" {
     defer allocator.destroy(lex);
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
-    //todo adjust this when implementing exp for let and return stmt
     const strings: [2][]const u8 = .{
-        "let five = tempval;",
-        "let ten = tempval;",
+        "let five = ten",
+        "let ten = five",
     };
     for (program.statements.items, 0..) |stmt, index| {
         var buf: [256]u8 = undefined;
@@ -404,9 +432,14 @@ test "Test return statements" {
     defer allocator.destroy(lex);
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
-    for (0..2) |index| {
-        const stmt = program.statements.items[index];
-        try std.testing.expect(@TypeOf(stmt.return_stmt) == ast.ReturnStatement);
+    const strings: [2][]const u8 = .{
+        "return 100",
+        "return 9",
+    };
+    for (program.statements.items, 0..) |stmt, index| {
+        var buf: [256]u8 = undefined;
+        const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+        try std.testing.expect(std.mem.eql(u8, strings[index], str));
     }
 }
 test "Test Expression" {
@@ -521,12 +554,12 @@ test "Test infix  Expression" {
     }
 }
 
-test "test a lot of expression combos" {
+test "test a lot of expression combos and function callExpression" {
     const input =
         \\!-a;
-        \\a + b + c;
-        \\a + b - c;
-        \\a * b * c;
+        \\a + add(b * d) + c;
+        \\a + sub(10, 5) - c;
+        \\add(1,a,x+y,sub(a,b,x+y))
         \\a * b / c;
         \\a + b / c;
         \\a + b * c + d / e - f;
@@ -545,9 +578,9 @@ test "test a lot of expression combos" {
     const program = try parser.parse();
     const strings: [13][]const u8 = .{
         "(!(-a))",
-        "((a + b) + c)",
-        "((a + b) - c)",
-        "((a * b) * c)",
+        "((a + add((b * d))) + c)",
+        "((a + sub(10,5)) - c)",
+        "add(1,a,(x + y),sub(a,b,(x + y)))",
         "((a * b) / c)",
         "(a + (b / c))",
         "(((a + (b * c)) + (d / e)) - f)",
