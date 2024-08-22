@@ -1,4 +1,24 @@
 const std = @import("std");
+pub const Precedences = enum {
+    lowest,
+    equals,
+    comparision,
+    sum,
+    product,
+    prefix,
+    call,
+    pub fn intVal(self: Precedences) i32 {
+        return switch (self) {
+            .lowest => @intFromEnum(Precedences.lowest),
+            .equals => @intFromEnum(Precedences.equals),
+            .comparision => @intFromEnum(Precedences.comparision),
+            .sum => @intFromEnum(Precedences.sum),
+            .product => @intFromEnum(Precedences.product),
+            .prefix => @intFromEnum(Precedences.prefix),
+            .call => @intFromEnum(Precedences.call),
+        };
+    }
+};
 pub const tokens = union(enum) {
     ident: []const u8,
     int: []const u8,
@@ -27,6 +47,58 @@ pub const tokens = union(enum) {
     lesserThan,
     equal_to,
     not_equal_to,
+    pub fn format(self: tokens, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        switch (self) {
+            .minus => try writer.writeByte('-'),
+            .plus => try writer.writeByte('+'),
+            .bang => try writer.writeByte('!'),
+            .asterisk => try writer.writeByte('*'),
+            .slash => try writer.writeByte('/'),
+            .lesserThan => try writer.writeByte('<'),
+            .greaterThan => try writer.writeByte('>'),
+            .not_equal_to => try writer.writeAll("!="),
+            .equal_to => try writer.writeAll("=="),
+            .ident, .int => |val| try writer.writeAll(val),
+            .semicolon => try writer.writeByte(';'),
+            .bool_true => try writer.print("{}", .{true}),
+            .bool_false => try writer.print("{}", .{false}),
+            .rparen => try writer.writeByte(')'),
+            .lparen => try writer.writeByte('('),
+            .lbrace => try writer.writeByte('{'),
+            .rbrace => try writer.writeByte('}'),
+            .if_stmt => try writer.writeAll("if"),
+            .else_stmt => try writer.writeAll("else"),
+            .function => try writer.writeAll("func"),
+            .assign => try writer.writeByte('='),
+            else => {},
+        }
+    }
+    pub fn precedence(self: tokens) i32 {
+        return switch (self) {
+            .equal_to => Precedences.equals.intVal(),
+            .not_equal_to => Precedences.equals.intVal(),
+            .lesserThan => Precedences.comparision.intVal(),
+            .greaterThan => Precedences.comparision.intVal(),
+            .plus => Precedences.sum.intVal(),
+            .minus => Precedences.sum.intVal(),
+            .slash => Precedences.product.intVal(),
+            .asterisk => Precedences.product.intVal(),
+            .lparen => Precedences.call.intVal(),
+            else => Precedences.lowest.intVal(),
+        };
+    }
+    pub fn isPrefix(self: tokens) bool {
+        return switch (self) {
+            .int, .ident, .minus, .bang, .bool_true, .bool_false, .lparen, .if_stmt, .function => true,
+            else => false,
+        };
+    }
+    pub fn getIdentValue(self: tokens) []const u8 {
+        return switch (self) {
+            .ident => |val| val,
+            else => "",
+        };
+    }
 };
 
 const keyWord = struct { key: []const u8, val: tokens };
