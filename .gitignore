@@ -1,5 +1,5 @@
 # Ignore build artifacts
-build/
-zig-cache/
-zig-out/
+zig/build/
+zig/zig-cache/
+zig/zig-out/
 

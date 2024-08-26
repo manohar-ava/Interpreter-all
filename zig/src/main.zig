@@ -7,9 +7,21 @@ pub fn main() !void {
     const stdin_file = std.io.getStdIn().reader();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
-    try stdout.print("Welcome let's start rat race!!!\n", .{});
+    // try stdout.print(
+    //     \\ ╔════════════════════════════════════════════════════════════════════════════════════╗
+    //     \\ ║ ▀█████████▄  ▄██   ▄       ███        ▄████████         ▄▄▄▄███▄▄▄▄      ▄████████ ║
+    //     \\ ║   ███    ███ ███   ██▄ ▀█████████▄   ███    ███       ▄██▀▀▀███▀▀▀██▄   ███    ███ ║
+    //     \\ ║   ███    ███ ███▄▄▄███    ▀███▀▀██   ███    █▀        ███   ███   ███   ███    █▀  ║
+    //     \\ ║  ▄███▄▄▄██▀  ▀▀▀▀▀▀███     ███   ▀  ▄███▄▄▄           ███   ███   ███  ▄███▄▄▄     ║
+    //     \\ ║ ▀▀███▀▀▀██▄  ▄██   ███     ███     ▀▀███▀▀▀           ███   ███   ███ ▀▀███▀▀▀     ║
+    //     \\ ║   ███    ██▄ ███   ███     ███       ███    █▄        ███   ███   ███   ███    █▄  ║
+    //     \\ ║   ███    ███ ███   ███     ███       ███    ███       ███   ███   ███   ███    ███ ║
+    //     \\ ║ ▄█████████▀   ▀█████▀     ▄████▀     ██████████        ▀█   ███   █▀    ██████████ ║
+    //     \\ ╚════════════════════════════════════════════════════════════════════════════════════╝
+    // , .{});
+    try stdout.print("let's start parsing", .{});
     try bw.flush();
-    try stdout.print(">>", .{});
+    try stdout.print("\n>>", .{});
     try bw.flush();
     var buffer: [512]u8 = undefined;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -20,10 +32,13 @@ pub fn main() !void {
         defer allocator.destroy(lex);
         var parser = try Parser.newParser(&allocator, lex);
         const program = try parser.parse();
-        for (program.statements.items) |stmt| {
-            var buf: [256]u8 = undefined;
-            const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-            try stdout.print("{s}\n", .{str});
+        const hasErrors = parser.printErrors();
+        if (!hasErrors) {
+            for (program.statements.items) |stmt| {
+                var buf: [256]u8 = undefined;
+                const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
+                try stdout.print("{s}\n", .{str});
+            }
         }
         try stdout.print(">>", .{});
         try bw.flush();

@@ -7,13 +7,8 @@ const Precedences = token.Precedences;
 const tokens = token.tokens;
 
 const ParserError = error{
-    parseStatementIsUndefined,
-    badStatement,
-    expectedIdentifier,
-    expectedAssign,
     parseIntError,
     OutOfMemory,
-    missingRightParentheses,
 };
 
 pub fn dbg(stmt: ast.Statement) void {
@@ -26,6 +21,7 @@ pub const Parser = struct {
     allocator: *std.mem.Allocator,
     curToken: tokens = undefined,
     peekToken: tokens = undefined,
+    errors: std.ArrayList([]const u8),
     pub fn nextToken(self: *Self) void {
         self.curToken = self.peekToken;
         self.peekToken = self.l.nextToken();
@@ -36,28 +32,29 @@ pub const Parser = struct {
     fn isCurToken(self: *Self, tok: tokens) bool {
         return @intFromEnum(self.curToken) == @intFromEnum(tok);
     }
+    fn appendPeekError(self: *Self, tok: tokens) !void {
+        const str = try std.fmt.allocPrint(self.allocator.*, "expected token {} but found {}", .{
+            tok,
+            self.peekToken,
+        });
+        // defer self.allocator.free(str);
+        try self.errors.append(str);
+    }
+    pub fn printErrors(self: *Self) bool {
+        if (self.errors.items.len == 0) {
+            return false;
+        }
+        for (self.errors.items) |stmt| {
+            std.debug.print("ParserError: {s}\n", .{stmt});
+        }
+        return true;
+    }
     pub fn parse(self: *Self) !*ast.Program {
         var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
         defer stmts.deinit();
         var program = ast.Program{ .statements = stmts };
         while (!self.isCurToken(tokens.eof)) {
-            const stmt = self.parseStatement() catch |err| {
-                switch (err) {
-                    ParserError.expectedAssign => {
-                        print("{} expected assign found {}\n", .{ err, self.peekToken });
-                        @panic("parserError:");
-                    },
-                    ParserError.expectedIdentifier => {
-                        print("{} expected identifier found {}\n", .{ err, self.peekToken });
-                        @panic("parserError:");
-                    },
-                    ParserError.badStatement => {
-                        print("{} bad statement synatx \n", .{err});
-                        @panic("parserError:");
-                    },
-                    else => @panic("parserError: unknown"),
-                }
-            };
+            const stmt = try self.parseStatement();
             try program.statements.append(stmt);
             self.nextToken();
         }
@@ -99,10 +96,12 @@ pub const Parser = struct {
                     .name = val,
                 };
             },
-            else => return ParserError.expectedIdentifier,
+            else => {
+                try self.appendPeekError(tokens{ .ident = "identifier" });
+            },
         }
         if (!self.isPeekToken(tokens.assign)) {
-            @panic("expected = but got something else parseLetStatement");
+            try self.appendPeekError(tokens.assign);
         }
         self.nextToken(); // jump to =
         self.nextToken(); // jump to expression token
@@ -174,7 +173,7 @@ pub const Parser = struct {
                 const exp = try self.allocator.create(ast.Expression);
                 exp.* = try self.parseExpression(Precedences.lowest.intVal());
                 if (!self.isPeekToken(tokens.rparen)) {
-                    return ParserError.missingRightParentheses;
+                    try self.appendPeekError(tokens.rparen);
                 }
                 self.nextToken();
                 return exp.*;
@@ -182,18 +181,18 @@ pub const Parser = struct {
             .if_stmt => {
                 const ifExp = try self.allocator.create(ast.IfExpression);
                 if (!self.isPeekToken(tokens.lparen)) {
-                    @panic("no left parentheses in if");
+                    try self.appendPeekError(tokens.lparen);
                 }
                 self.nextToken();
                 self.nextToken();
                 const conditionExp = try self.allocator.create(ast.Expression);
                 conditionExp.* = try self.parseExpression(Precedences.lowest.intVal());
                 if (!self.isPeekToken(tokens.rparen)) {
-                    @panic("no right parentheses in if");
+                    try self.appendPeekError(tokens.rparen);
                 }
                 self.nextToken();
                 if (!self.isPeekToken(tokens.lbrace)) {
-                    @panic("no left brace in if");
+                    try self.appendPeekError(tokens.lbrace);
                 }
                 self.nextToken();
 
@@ -210,7 +209,7 @@ pub const Parser = struct {
                     self.nextToken();
 
                     if (!self.isPeekToken(tokens.lbrace)) {
-                        @panic("no left brace in if");
+                        try self.appendPeekError(tokens.lbrace);
                     }
                     self.nextToken();
                     const ifAlternative = try self.allocator.create(ast.BlockStatement);
@@ -224,13 +223,13 @@ pub const Parser = struct {
                 const func = try self.allocator.create(ast.FunctionLiteral);
                 func.token = self.curToken;
                 if (!self.isPeekToken(tokens.lparen)) {
-                    @panic("no left parentheses in function literal");
+                    try self.appendPeekError(tokens.lparen);
                 }
                 self.nextToken();
                 const parameters = try self.parseFunctionParameters();
                 func.parameters = parameters;
                 if (!self.isPeekToken(tokens.lbrace)) {
-                    @panic("no left brace in function literal");
+                    try self.appendPeekError(tokens.lbrace);
                 }
                 self.nextToken();
                 const body = try self.allocator.create(ast.BlockStatement);
@@ -295,7 +294,7 @@ pub const Parser = struct {
             try params.append(ast.Identifier{ .name = self.curToken.getIdentValue() });
         }
         if (!self.isPeekToken(tokens.rparen)) {
-            @panic("no right parentheses in function literal parameters func");
+            try self.appendPeekError(tokens.rparen);
         }
         self.nextToken();
         return params;
@@ -314,7 +313,7 @@ pub const Parser = struct {
             try args.append(try self.parseExpression(Precedences.lowest.intVal()));
         }
         if (!self.isPeekToken(tokens.rparen)) {
-            @panic("no right parentheses in call expression parseArguments func");
+            try self.appendPeekError(tokens.rparen);
         }
         self.nextToken();
         return args;
@@ -323,7 +322,8 @@ pub const Parser = struct {
 
 pub fn newParser(alloc: *std.mem.Allocator, l: *lexer.Lexer) !*Parser {
     var p_ptr = try alloc.create(Parser);
-    p_ptr.* = .{ .l = l, .allocator = alloc };
+    const errors = std.ArrayList([]const u8).init(alloc.*);
+    p_ptr.* = .{ .l = l, .allocator = alloc, .errors = errors };
     p_ptr.nextToken();
     p_ptr.nextToken();
     return p_ptr;
@@ -409,6 +409,7 @@ test "Test let statements with expression" {
     defer allocator.destroy(lex);
     var parser = try newParser(&allocator, lex);
     const program = try parser.parse();
+
     const strings: [2][]const u8 = .{
         "let five = ten",
         "let ten = five",
