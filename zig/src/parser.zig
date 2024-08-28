@@ -50,15 +50,15 @@ pub const Parser = struct {
         return true;
     }
     pub fn parse(self: *Self) !*ast.Program {
-        var stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
-        defer stmts.deinit();
-        var program = ast.Program{ .statements = stmts };
+        const program = try self.allocator.create(ast.Program);
+        const stmts = std.ArrayList(ast.Statement).init(self.allocator.*);
+        program.statements = stmts;
         while (!self.isCurToken(tokens.eof)) {
             const stmt = try self.parseStatement();
             try program.statements.append(stmt);
             self.nextToken();
         }
-        return &program;
+        return program;
     }
     pub fn parseStatement(self: *Self) !ast.Statement {
         return switch (self.curToken) {

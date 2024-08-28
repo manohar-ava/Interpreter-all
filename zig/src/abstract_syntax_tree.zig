@@ -6,6 +6,7 @@ pub const Statement = union(enum) {
     return_stmt: ReturnStatement,
     expression_stmt: ExpressionStatement,
     block_stmt: BlockStatement,
+    Program: Program,
     pub fn format(self: Statement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
