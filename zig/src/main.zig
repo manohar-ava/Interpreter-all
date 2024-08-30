@@ -1,6 +1,8 @@
 const std = @import("std");
 const lexer = @import("./lexer.zig");
 const Parser = @import("./parser.zig");
+const evaluator = @import("evaluator.zig");
+const ast = @import("abstract_syntax_tree.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
@@ -34,11 +36,8 @@ pub fn main() !void {
         const program = try parser.parse();
         const hasErrors = parser.printErrors();
         if (!hasErrors) {
-            for (program.statements.items) |stmt| {
-                var buf: [256]u8 = undefined;
-                const str = try std.fmt.bufPrint(&buf, "{}", .{stmt});
-                try stdout.print("{s}\n", .{str});
-            }
+            const evalValue = try evaluator.evaluate(&allocator, program);
+            try stdout.print("{}\n", .{evalValue});
         }
         try stdout.print(">>", .{});
         try bw.flush();
