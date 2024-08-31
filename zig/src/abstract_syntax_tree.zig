@@ -30,6 +30,8 @@ pub const Statement = union(enum) {
         std.debug.print("stmt: {}\n", .{self});
         return switch (self) {
             .expression_stmt => |item| try item.eval(alloc),
+            .return_stmt => |item| try item.eval(alloc),
+            .block_stmt => |item| try item.eval(alloc),
             else => Object{ .Null = NULL },
         };
     }
@@ -79,7 +81,14 @@ pub const ReturnStatement = struct {
     pub fn format(self: ReturnStatement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("return {}", .{self.value});
     }
+    pub fn eval(self: ReturnStatement, alloc: *std.mem.Allocator) !Object {
+        const returnPtr = try alloc.create(object.Return);
+        returnPtr.value = try self.value.eval(alloc);
+        std.debug.print("return stmt: {}\n", .{returnPtr.*});
+        return Object{ .Return = returnPtr };
+    }
 };
+
 pub const ExpressionStatement = struct {
     expression: Expression = undefined,
     pub fn format(self: ExpressionStatement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -133,7 +142,7 @@ pub fn evalMinusOperator(alloc: *std.mem.Allocator, right: Object) !Object {
             intPtr.value = -item.value;
             return Object{ .Interger = intPtr };
         },
-        else => Object{ .Null = NULL },
+        else => object.newError(alloc, "Invalid Type: -{s}", .{right.getType()}),
     };
 }
 
@@ -155,11 +164,21 @@ pub const InfixExpression = struct {
     pub fn eval(self: InfixExpression, alloc: *std.mem.Allocator) anyerror!Object {
         const right = try self.right.eval(alloc);
         const left = try self.left.eval(alloc);
+        if (!object.isSameTag(left, right)) {
+            return object.newError(alloc, "Type Mismatch: {s} {any} {s}", .{
+                left.getType(),
+                self.operator,
+                right.getType(),
+            });
+        }
         if (object.isIntergerTag(right) and object.isIntergerTag(left)) {
             return try evalIntergerInfix(alloc, self.operator, left, right);
-        } else {
-            return Object{ .Null = NULL };
         }
+        return object.newError(alloc, "Unknown Operator: {s} {any} {s}", .{
+            left.getType(),
+            self.operator,
+            right.getType(),
+        });
     }
 };
 
@@ -243,13 +262,15 @@ pub const BlockStatement = struct {
         }
         try writer.writeAll("}");
     }
-    pub fn eval(self: BlockStatement, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: BlockStatement, alloc: *std.mem.Allocator) anyerror!Object {
         const res = try alloc.create(Object);
         res.* = Object{ .Null = NULL };
         for (self.statements.items) |statement| {
             res.* = try statement.eval(alloc);
+            if (object.isReturnTag(res.*) or object.isErrorTag(res.*)) {
+                return res.*;
+            }
         }
-        std.debug.print("block stmt loop: {} \n", .{res.*});
         return res.*;
     }
 };
@@ -299,6 +320,12 @@ pub const Program = struct {
         res.* = Object{ .Null = NULL };
         for (self.statements.items) |statement| {
             res.* = try statement.eval(alloc);
+            if (object.isReturnTag(res.*)) {
+                return res.Return.value;
+            }
+            if (object.isErrorTag(res.*)) {
+                return res.*;
+            }
         }
         std.debug.print("stmt loop: {} \n", .{res.*});
         return res.*;
