@@ -3,6 +3,7 @@ const Parser = @import("./parser.zig");
 const Lexer = @import("./lexer.zig");
 const ast = @import("./abstract_syntax_tree.zig");
 const evaluator = @import("evaluator.zig");
+const environment = @import("environment.zig");
 const testing = std.testing;
 
 pub const Object = union(enum) {
@@ -11,6 +12,7 @@ pub const Object = union(enum) {
     Null: *const Null,
     Return: *const Return,
     Error: *const Error,
+    Function: *const Function,
     pub fn format(self: Object, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
@@ -75,6 +77,23 @@ pub const Null = struct {
     }
 };
 
+pub const Function = struct {
+    parameters: std.ArrayList(ast.Identifier),
+    body: *const ast.BlockStatement,
+    env: *environment,
+    pub fn format(self: Function, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("func(", .{});
+        for (self.parameters.items, 1..) |stmt, index| {
+            if (index == self.parameters.items.len) {
+                try writer.print("{})", .{stmt});
+            } else {
+                try writer.print("{},", .{stmt});
+            }
+        }
+        try writer.print("{}", .{self.body});
+    }
+};
+
 pub const Error = struct {
     value: []const u8,
     pub fn format(self: Error, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
@@ -87,6 +106,16 @@ pub fn newError(alloc: *std.mem.Allocator, comptime format: []const u8, args: an
     const error_obj = try alloc.create(Error);
     error_obj.* = .{ .value = message };
     return Object{ .Error = error_obj };
+}
+
+pub fn testEval(allocator: *std.mem.Allocator, input: []const u8) !?Object {
+    const lex = try Lexer.newLexer(allocator, input);
+    defer allocator.destroy(lex);
+    var parser = try Parser.newParser(allocator, lex);
+    const program = try parser.parse();
+    var env = try environment.newEnv(allocator);
+    defer env.deinit();
+    return try evaluator.evaluate(allocator, program, &env);
 }
 
 test "test return evaluation" {
@@ -105,12 +134,7 @@ test "test return evaluation" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
-        const lex = try Lexer.newLexer(&allocator, input);
-        defer allocator.destroy(lex);
-        var parser = try Parser.newParser(&allocator, lex);
-        const program = try parser.parse();
-        const evalValue = try evaluator.evaluate(&allocator, program);
-        std.debug.print("{any}\n", .{evalValue});
+        const evalValue = try testEval(&allocator, input);
         if (evalValue) |e| {
             try std.testing.expect(e.Interger.value == expected[i]);
         }
@@ -132,12 +156,7 @@ test "test condition evaluation" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
-        const lex = try Lexer.newLexer(&allocator, input);
-        defer allocator.destroy(lex);
-        var parser = try Parser.newParser(&allocator, lex);
-        const program = try parser.parse();
-        const evalValue = try evaluator.evaluate(&allocator, program);
-        std.debug.print("{any}\n", .{evalValue});
+        const evalValue = try testEval(&allocator, input);
         if (evalValue) |e| {
             try std.testing.expect(e.Interger.value == expected[i]);
         }
@@ -162,11 +181,7 @@ test "test int evaluation" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
-        const lex = try Lexer.newLexer(&allocator, input);
-        defer allocator.destroy(lex);
-        var parser = try Parser.newParser(&allocator, lex);
-        const program = try parser.parse();
-        const evalValue = try evaluator.evaluate(&allocator, program);
+        const evalValue = try testEval(&allocator, input);
         const intValue = switch (evalValue.?) {
             .Interger => |item| item.value,
             else => @panic("int test failed"),
@@ -199,11 +214,7 @@ test "test boolean evaluation" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
-        const lex = try Lexer.newLexer(&allocator, input);
-        defer allocator.destroy(lex);
-        var parser = try Parser.newParser(&allocator, lex);
-        const program = try parser.parse();
-        const evalValue = try evaluator.evaluate(&allocator, program);
+        const evalValue = try testEval(&allocator, input);
         const boolValue = switch (evalValue.?) {
             .Boolean => |item| item.value,
             else => @panic("boolean test failed"),
@@ -234,19 +245,60 @@ test "test errors for eval" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
-        const lex = try Lexer.newLexer(&allocator, input);
-        defer allocator.destroy(lex);
-        var parser = try Parser.newParser(&allocator, lex);
-        const program = try parser.parse();
-        const evalValue = try evaluator.evaluate(&allocator, program);
-        std.debug.print("{any} \n", .{evalValue});
-        // _ = i;
-        // _ = expected;
+        const evalValue = try testEval(&allocator, input);
         const errVal = switch (evalValue.?) {
             .Error => |item| item.value,
             else => @panic("error test failed"),
         };
         try std.testing.expect(std.mem.eql(u8, errVal, expected[i]));
+        std.debug.print("--------------------------------------------- \n", .{});
+    }
+    std.debug.print("============================================= \n", .{});
+}
+test "test env" {
+    const inputs: [5][]const u8 = .{
+        "let x = 1+3; return x;",
+        "let a = 5; a;",
+        "let a = 5 * 5; a;",
+        "let a = 5; let b = a; b;",
+        "let a = 5; let b = a; let c = a + b + 5; c;",
+    };
+    const expected: [5]i64 = .{ 4, 5, 25, 5, 15 };
+    for (inputs, 0..) |input, i| {
+        std.debug.print("--------------------------------------------- \n", .{});
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, input);
+        const intVal = switch (evalValue.?) {
+            .Interger => |item| item.value,
+            else => @panic("env test failed"),
+        };
+        try std.testing.expect(intVal == expected[i]);
+        std.debug.print("--------------------------------------------- \n", .{});
+    }
+    std.debug.print("============================================= \n", .{});
+}
+
+test "test functions" {
+    const inputs: [1][]const u8 = .{
+        "let double = func(x){ x * 2 }; double(10)",
+    };
+    const expected: [1]i64 = .{10};
+    for (inputs, 0..) |input, i| {
+        std.debug.print("--------------------------------------------- \n", .{});
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, input);
+        _ = i;
+        _ = expected;
+        std.debug.print("{any}\n", .{evalValue});
+        // const intVal = switch (evalValue.?) {
+        //     .Interger => |item| item.value,
+        //     else => @panic("env test failed"),
+        // };
+        // try std.testing.expect(intVal == expected[i]);
         std.debug.print("--------------------------------------------- \n", .{});
     }
     std.debug.print("============================================= \n", .{});

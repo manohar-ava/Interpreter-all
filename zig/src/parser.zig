@@ -260,7 +260,7 @@ pub const Parser = struct {
                 return ast.Expression{ .infix_exp = infixExp.* };
             },
             .lparen => {
-                const callExpression = try self.allocator.create(ast.CallExpressin);
+                const callExpression = try self.allocator.create(ast.CallExpression);
                 const function = try self.allocator.create(ast.Expression);
                 function.* = leftExp;
                 callExpression.arguments = try self.parseArguments();

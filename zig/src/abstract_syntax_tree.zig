@@ -1,6 +1,7 @@
 const std = @import("std");
 const token = @import("./token.zig");
 const object = @import("object.zig");
+const environment = @import("environment.zig");
 const Object = object.Object;
 
 const TRUE = &object.Boolean{ .value = true };
@@ -26,13 +27,10 @@ pub const Statement = union(enum) {
             inline else => |item| try writer.print("{}", .{item}),
         }
     }
-    pub fn eval(self: Statement, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: Statement, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
         std.debug.print("stmt: {}\n", .{self});
         return switch (self) {
-            .expression_stmt => |item| try item.eval(alloc),
-            .return_stmt => |item| try item.eval(alloc),
-            .block_stmt => |item| try item.eval(alloc),
-            else => Object{ .Null = NULL },
+            inline else => |item| try item.eval(alloc, env),
         };
     }
 };
@@ -45,20 +43,15 @@ pub const Expression = union(enum) {
     boolean_exp: BooleanExpression,
     if_exp: IfExpression,
     fn_literal: FunctionLiteral,
-    call_exp: CallExpressin,
+    call_exp: CallExpression,
     pub fn format(self: Expression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         switch (self) {
             inline else => |item| try writer.print("{}", .{item}),
         }
     }
-    pub fn eval(self: Expression, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: Expression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
         return switch (self) {
-            .integer => |item| try item.eval(alloc),
-            .boolean_exp => |item| try item.eval(alloc),
-            .prefix_exp => |item| try item.eval(alloc),
-            .infix_exp => |item| try item.eval(alloc),
-            .if_exp => |item| try item.eval(alloc),
-            else => Object{ .Null = NULL },
+            inline else => |item| try item.eval(alloc, env),
         };
     }
 };
@@ -74,6 +67,10 @@ pub const LetStatement = struct {
     ) !void {
         try writer.print("let {} = {}", .{ self.identifier, self.value });
     }
+    pub fn eval(self: LetStatement, alloc: *std.mem.Allocator, env: *environment) !Object {
+        std.debug.print("in let stmt {}\n", .{self});
+        return try env.put(self.identifier.name, try self.value.eval(alloc, env));
+    }
 };
 
 pub const ReturnStatement = struct {
@@ -81,9 +78,9 @@ pub const ReturnStatement = struct {
     pub fn format(self: ReturnStatement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("return {}", .{self.value});
     }
-    pub fn eval(self: ReturnStatement, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: ReturnStatement, alloc: *std.mem.Allocator, env: *environment) !Object {
         const returnPtr = try alloc.create(object.Return);
-        returnPtr.value = try self.value.eval(alloc);
+        returnPtr.value = try self.value.eval(alloc, env);
         std.debug.print("return stmt: {}\n", .{returnPtr.*});
         return Object{ .Return = returnPtr };
     }
@@ -94,9 +91,9 @@ pub const ExpressionStatement = struct {
     pub fn format(self: ExpressionStatement, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{}", .{self.expression});
     }
-    pub fn eval(self: ExpressionStatement, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: ExpressionStatement, alloc: *std.mem.Allocator, env: *environment) !Object {
         std.debug.print("expstmt: {}\n", .{self});
-        return try self.expression.eval(alloc);
+        return try self.expression.eval(alloc, env);
     }
 };
 
@@ -105,6 +102,13 @@ pub const Identifier = struct {
     pub fn format(self: Identifier, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.writeAll(self.name);
     }
+    pub fn eval(self: Identifier, alloc: *std.mem.Allocator, env: *environment) !Object {
+        if (env.get(self.name)) |item| {
+            return item;
+        } else {
+            return object.newError(alloc, "Unknown Identifier: {s}", .{self.name});
+        }
+    }
 };
 
 pub const IntegerLiteral = struct {
@@ -112,7 +116,7 @@ pub const IntegerLiteral = struct {
     pub fn format(self: IntegerLiteral, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{}", .{self.value});
     }
-    pub fn eval(self: IntegerLiteral, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: IntegerLiteral, alloc: *std.mem.Allocator, _: *environment) !Object {
         const intPtr = try alloc.create(object.Interger);
         intPtr.value = self.value;
         return Object{ .Interger = intPtr };
@@ -125,8 +129,8 @@ pub const PrefixExpression = struct {
     pub fn format(self: PrefixExpression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("({}{})", .{ self.operator, self.right });
     }
-    pub fn eval(self: PrefixExpression, alloc: *std.mem.Allocator) anyerror!Object {
-        const right = try self.right.eval(alloc);
+    pub fn eval(self: PrefixExpression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
+        const right = try self.right.eval(alloc, env);
         return switch (self.operator) {
             .bang => try evalBangOperator(right),
             .minus => try evalMinusOperator(alloc, right),
@@ -161,9 +165,9 @@ pub const InfixExpression = struct {
     pub fn format(self: InfixExpression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("({} {} {})", .{ self.left, self.operator, self.right });
     }
-    pub fn eval(self: InfixExpression, alloc: *std.mem.Allocator) anyerror!Object {
-        const right = try self.right.eval(alloc);
-        const left = try self.left.eval(alloc);
+    pub fn eval(self: InfixExpression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
+        const right = try self.right.eval(alloc, env);
+        const left = try self.left.eval(alloc, env);
         if (!object.isSameTag(left, right)) {
             return object.newError(alloc, "Type Mismatch: {s} {any} {s}", .{
                 left.getType(),
@@ -227,7 +231,7 @@ pub const BooleanExpression = struct {
     pub fn format(self: BooleanExpression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{}", .{self.value});
     }
-    pub fn eval(self: BooleanExpression, _: *std.mem.Allocator) !Object {
+    pub fn eval(self: BooleanExpression, _: *std.mem.Allocator, _: *environment) !Object {
         return Object{ .Boolean = getNativeBooleanValue(self.value) };
     }
 };
@@ -241,12 +245,12 @@ pub const IfExpression = struct {
             try writer.print(" else {}", .{alt});
         }
     }
-    pub fn eval(self: IfExpression, alloc: *std.mem.Allocator) anyerror!Object {
-        const conditionValue = try self.condition.eval(alloc);
+    pub fn eval(self: IfExpression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
+        const conditionValue = try self.condition.eval(alloc, env);
         if (object.isTruthy(conditionValue)) {
-            return try self.consequence.eval(alloc);
+            return try self.consequence.eval(alloc, env);
         } else if (self.alternative) |alt| {
-            return try alt.eval(alloc);
+            return try alt.eval(alloc, env);
         } else {
             return Object{ .Null = NULL };
         }
@@ -262,11 +266,11 @@ pub const BlockStatement = struct {
         }
         try writer.writeAll("}");
     }
-    pub fn eval(self: BlockStatement, alloc: *std.mem.Allocator) anyerror!Object {
+    pub fn eval(self: BlockStatement, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
         const res = try alloc.create(Object);
         res.* = Object{ .Null = NULL };
         for (self.statements.items) |statement| {
-            res.* = try statement.eval(alloc);
+            res.* = try statement.eval(alloc, env);
             if (object.isReturnTag(res.*) or object.isErrorTag(res.*)) {
                 return res.*;
             }
@@ -290,12 +294,19 @@ pub const FunctionLiteral = struct {
         }
         try writer.print("{}", .{self.body});
     }
+    pub fn eval(self: FunctionLiteral, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
+        const funcPtr = try alloc.create(object.Function);
+        funcPtr.env = env;
+        funcPtr.body = self.body;
+        funcPtr.parameters = self.parameters;
+        return Object{ .Function = funcPtr };
+    }
 };
 
-pub const CallExpressin = struct {
+pub const CallExpression = struct {
     function: *const Expression,
     arguments: std.ArrayList(Expression),
-    pub fn format(self: CallExpressin, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn format(self: CallExpression, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         try writer.print("{}(", .{self.function});
         for (self.arguments.items, 1..) |stmt, index| {
             if (index == self.arguments.items.len) {
@@ -304,6 +315,9 @@ pub const CallExpressin = struct {
                 try writer.print("{},", .{stmt});
             }
         }
+    }
+    pub fn eval(self: CallExpression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
+        return try self.function.eval(alloc, env);
     }
 };
 
@@ -315,11 +329,11 @@ pub const Program = struct {
         }
     }
 
-    pub fn eval(self: Program, alloc: *std.mem.Allocator) !Object {
+    pub fn eval(self: Program, alloc: *std.mem.Allocator, env: *environment) !Object {
         const res = try alloc.create(Object);
         res.* = Object{ .Null = NULL };
         for (self.statements.items) |statement| {
-            res.* = try statement.eval(alloc);
+            res.* = try statement.eval(alloc, env);
             if (object.isReturnTag(res.*)) {
                 return res.Return.value;
             }

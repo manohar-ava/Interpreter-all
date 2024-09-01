@@ -3,6 +3,7 @@ const lexer = @import("./lexer.zig");
 const Parser = @import("./parser.zig");
 const evaluator = @import("evaluator.zig");
 const ast = @import("abstract_syntax_tree.zig");
+const environment = @import("environment.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
@@ -29,6 +30,8 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var allocator = arena.allocator();
+    var env = try environment.newEnv(&allocator);
+    defer env.deinit();
     while (try stdin_file.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
         const lex = try lexer.newLexer(&allocator, line);
         defer allocator.destroy(lex);
@@ -36,8 +39,8 @@ pub fn main() !void {
         const program = try parser.parse();
         const hasErrors = parser.printErrors();
         if (!hasErrors) {
-            const evalValue = try evaluator.evaluate(&allocator, program);
-            try stdout.print("{}\n", .{evalValue});
+            const evalValue = try evaluator.evaluate(&allocator, program, &env);
+            try stdout.print("{any}\n", .{evalValue});
         }
         try stdout.print(">>", .{});
         try bw.flush();
