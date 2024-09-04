@@ -69,7 +69,7 @@ pub const LetStatement = struct {
     }
     pub fn eval(self: LetStatement, alloc: *std.mem.Allocator, env: *environment) !Object {
         std.debug.print("in let stmt {}\n", .{self});
-        return try env.put(self.identifier.name, try self.value.eval(alloc, env));
+        return try env.put(try alloc.dupe(u8, self.identifier.name), try self.value.eval(alloc, env));
     }
 };
 
@@ -103,7 +103,7 @@ pub const Identifier = struct {
         try writer.writeAll(self.name);
     }
     pub fn eval(self: Identifier, alloc: *std.mem.Allocator, env: *environment) !Object {
-        if (env.get(self.name)) |item| {
+        if (env.get(try alloc.dupe(u8, self.name))) |item| {
             return item;
         } else {
             return object.newError(alloc, "Unknown Identifier: {s}", .{self.name});
@@ -317,9 +317,60 @@ pub const CallExpression = struct {
         }
     }
     pub fn eval(self: CallExpression, alloc: *std.mem.Allocator, env: *environment) anyerror!Object {
-        return try self.function.eval(alloc, env);
+        const func = try self.function.eval(alloc, env);
+        if (object.isErrorTag(func)) {
+            return func;
+        }
+        const args = try evalExpressions(alloc, env, self.arguments);
+        if (args.items.len == 1 and object.isErrorTag(args.items[0])) {
+            return args.items[0];
+        }
+        const paramLen = func.Function.parameters.items.len;
+        const argsLen = self.arguments.items.len;
+        if (paramLen != argsLen) {
+            return object.newError(
+                alloc,
+                "Invalid Argument Count: function [{}] expects {} but received {}",
+                .{ self.function, paramLen, argsLen },
+            );
+        }
+        return try applyFunction(alloc, func, args);
     }
 };
+
+fn applyFunction(alloc: *std.mem.Allocator, func: Object, args: std.ArrayList(Object)) !Object {
+    if (!object.isFunctionTag(func)) {
+        return object.newError(alloc, "Not a function : {s}", .{func.getType()});
+    }
+    var extendedEnv = try environment.newEnclosedEnv(alloc, func.Function.env);
+    for (func.Function.parameters.items, 0..) |param, paramIdx| {
+        _ = try extendedEnv.put(try alloc.dupe(u8, param.name), args.items[paramIdx]);
+    }
+    const evaluated = try func.Function.body.eval(alloc, extendedEnv);
+    return unWrapReturnValue(evaluated);
+}
+
+fn unWrapReturnValue(o: Object) Object {
+    if (object.isReturnTag(o)) {
+        return o.Return.value;
+    }
+    return o;
+}
+
+fn evalExpressions(alloc: *std.mem.Allocator, env: *environment, exps: std.ArrayList(Expression)) !std.ArrayList(Object) {
+    var expsArr = std.ArrayList(Object).init(alloc.*);
+    for (exps.items) |value| {
+        const res = try value.eval(alloc, env);
+        if (object.isErrorTag(res)) {
+            expsArr.deinit();
+            var err = std.ArrayList(Object).init(alloc.*);
+            try err.append(res);
+            return err;
+        }
+        try expsArr.append(res);
+    }
+    return expsArr;
+}
 
 pub const Program = struct {
     statements: std.ArrayList(Statement),

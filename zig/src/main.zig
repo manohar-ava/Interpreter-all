@@ -27,21 +27,20 @@ pub fn main() !void {
     try stdout.print("\n>>", .{});
     try bw.flush();
     var buffer: [512]u8 = undefined;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var arena = std.heap.GeneralPurposeAllocator(.{}){};
+    // var arena = std.heap.ArenaAllocator.init(std.heap.GeneralPurposeAllocator(.{}){});
+    // defer arena.deinit();
     var allocator = arena.allocator();
-    var env = try environment.newEnv(&allocator);
-    defer env.deinit();
+    const env = try environment.newEnv(&allocator);
     while (try stdin_file.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
         const lex = try lexer.newLexer(&allocator, line);
-        defer allocator.destroy(lex);
         var parser = try Parser.newParser(&allocator, lex);
         const program = try parser.parse();
-        const hasErrors = parser.printErrors();
-        if (!hasErrors) {
-            const evalValue = try evaluator.evaluate(&allocator, program, &env);
-            try stdout.print("{any}\n", .{evalValue});
-        }
+        // const hasErrors = parser.printErrors();
+        // if (!hasErrors) {
+        const evalValue = try evaluator.evaluate(&allocator, program, env);
+        try stdout.print("{any}\n", .{evalValue});
+        // }
         try stdout.print(">>", .{});
         try bw.flush();
     }

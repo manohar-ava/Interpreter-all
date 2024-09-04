@@ -22,7 +22,7 @@ pub const Object = union(enum) {
         return switch (self) {
             .Interger => "INT",
             .Boolean => "BOOL",
-            inline else => "",
+            inline else => "unknown type",
         };
     }
 };
@@ -40,6 +40,10 @@ pub fn isReturnTag(ob: Object) bool {
 
 pub fn isErrorTag(ob: Object) bool {
     return @as(std.meta.Tag(Object), ob) == @as(std.meta.Tag(Object), Object{ .Error = undefined });
+}
+
+pub fn isFunctionTag(ob: Object) bool {
+    return @as(std.meta.Tag(Object), ob) == @as(std.meta.Tag(Object), Object{ .Function = undefined });
 }
 
 pub fn isTruthy(ob: Object) bool {
@@ -113,9 +117,9 @@ pub fn testEval(allocator: *std.mem.Allocator, input: []const u8) !?Object {
     defer allocator.destroy(lex);
     var parser = try Parser.newParser(allocator, lex);
     const program = try parser.parse();
-    var env = try environment.newEnv(allocator);
-    defer env.deinit();
-    return try evaluator.evaluate(allocator, program, &env);
+    const env = try environment.newEnv(allocator);
+    // defer env.deinit();
+    return try evaluator.evaluate(allocator, program, env);
 }
 
 test "test return evaluation" {
@@ -280,23 +284,56 @@ test "test env" {
     std.debug.print("============================================= \n", .{});
 }
 
-test "test functions" {
-    const inputs: [1][]const u8 = .{
+test "test functions and closures" {
+    const inputs: [6][]const u8 = .{
         "let double = func(x){ x * 2 }; double(10)",
+        "let triple = func(x){ return x * 3; }; triple(10)",
+        "let add = func(x,y){ x + y }; add(1+1,3+1)",
+        "let add = func(x,y){ x + y }; add(1+1,add(10,10))",
+        "let add = func(x,y){ x + y }; let prod = func(x,y){ x * y }; prod(add(1,1),prod(2,2));",
+        //test for closure
+        "let multiplier = func(x){ func(y){x * y}; }; let twoMultiplier = multiplier(2); twoMultiplier(8);",
     };
-    const expected: [1]i64 = .{10};
+    const expected: [6]i64 = .{ 20, 30, 6, 22, 8, 16 };
     for (inputs, 0..) |input, i| {
         std.debug.print("--------------------------------------------- \n", .{});
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
         var allocator = arena.allocator();
         const evalValue = try testEval(&allocator, input);
+        const intVal = switch (evalValue.?) {
+            .Interger => |item| item.value,
+            else => @panic("func test failed"),
+        };
+        try std.testing.expect(intVal == expected[i]);
+        std.debug.print("--------------------------------------------- \n", .{});
+    }
+    std.debug.print("============================================= \n", .{});
+}
+
+test "test closures" {
+    const inputs: [3][]const u8 = .{
+        "let multiplier = func(x){ func(y){x * y}; };",
+        "let twoMultiplier = multiplier(2);",
+        "twoMultiplier(8);",
+    };
+    const expected: [6]i64 = .{ 20, 30, 6, 22, 8, 16 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const env = try environment.newEnv(&allocator);
+    for (inputs, 0..) |input, i| {
+        std.debug.print("--------------------------------------------- \n", .{});
+        const lex = try Lexer.newLexer(&allocator, input);
+        var parser = try Parser.newParser(&allocator, lex);
+        const program = try parser.parse();
+        const evalValue = evaluator.evaluate(&allocator, program, env);
+        std.debug.print("{any} \n", .{evalValue});
         _ = i;
         _ = expected;
-        std.debug.print("{any}\n", .{evalValue});
         // const intVal = switch (evalValue.?) {
         //     .Interger => |item| item.value,
-        //     else => @panic("env test failed"),
+        //     else => @panic("func test failed"),
         // };
         // try std.testing.expect(intVal == expected[i]);
         std.debug.print("--------------------------------------------- \n", .{});
