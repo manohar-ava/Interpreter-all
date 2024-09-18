@@ -32,7 +32,7 @@ pub const Expression = union(enum) {
     boolean_exp: BooleanExpression,
     if_exp: IfExpression,
     fn_literal: FunctionLiteral,
-    call_exp: CallExpressin,
+    call_exp: callExpression,
     pub fn stringValue(self: *const Expression, buf: *String) !void {
         return switch (self.*) {
             inline else => |item| try item.stringValue(buf),
@@ -116,7 +116,7 @@ pub const PrefixExpression = struct {
         try self.right.stringValue(buf);
         try buf.concat(")");
     }
-    pub fn eval(self: PrefixExpression, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
+    pub fn eval(self: *const PrefixExpression, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
         const right = try self.right.eval(alloc, env);
         return switch (self.operator) {
             .bang => evalBangOperator(right),
@@ -273,17 +273,15 @@ pub const BlockStatement = struct {
         }
         try buf.concat(" }");
     }
-    pub fn eval(self: BlockStatement, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
+    pub fn eval(self: *const BlockStatement, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
         var result: *object.Object = &inbuilt.NULL_OBJECT;
-        var i: usize = 0;
-        while (i < self.statements.items.len) : (i += 1) {
-            const evaled = try self.statements.items[i].eval(alloc, env);
+        for (self.statements.items) |stmt| {
+            const evaled = try stmt.eval(alloc, env);
             if (object.isReturnTag(evaled.*) or object.isErrorTag(evaled.*)) {
                 return evaled;
             }
             result = evaled;
         }
-
         return result;
     }
 };
@@ -303,15 +301,15 @@ pub const FunctionLiteral = struct {
         }
         try self.body.stringValue(buf);
     }
-    pub fn eval(_: FunctionLiteral, _: std.mem.Allocator, _: *environment) !*Object {
-        return &inbuilt.NULL_OBJECT;
+    pub fn eval(self: *const FunctionLiteral, alloc: std.mem.Allocator, env: *environment) !*Object {
+        return try object.newFunction(alloc, self.parameters, self.body, env);
     }
 };
 
-pub const CallExpressin = struct {
+pub const callExpression = struct {
     function: *Expression,
     arguments: std.ArrayList(Expression),
-    pub fn stringValue(self: CallExpressin, buf: *String) String.Error!void {
+    pub fn stringValue(self: callExpression, buf: *String) String.Error!void {
         try self.function.stringValue(buf);
         try buf.concat("(");
         for (self.arguments.items, 1..) |arg, index| {
@@ -324,10 +322,71 @@ pub const CallExpressin = struct {
         }
     }
 
-    pub fn eval(_: CallExpressin, _: std.mem.Allocator, _: *environment) !*Object {
-        return &inbuilt.NULL_OBJECT;
+    pub fn eval(
+        self: callExpression,
+        alloc: std.mem.Allocator,
+        env: *environment,
+    ) !*Object {
+        const function = try self.function.eval(alloc, env);
+        switch (function.*) {
+            .Error => return function,
+            else => {},
+        }
+        var args = std.ArrayList(*Object).init(alloc);
+        for (self.arguments.items) |arg| {
+            const evaled = try arg.eval(alloc, env);
+            switch (evaled.*) {
+                .Error => return evaled,
+                else => {},
+            }
+            try args.append(evaled);
+        }
+        return try applyFunction(alloc, function, args);
     }
 };
+
+fn applyFunction(
+    alloc: std.mem.Allocator,
+    function: *Object,
+    arguments: std.ArrayList(*Object),
+) !*object.Object {
+    switch (function.*) {
+        .Function => |*func| {
+            if (func.parameters.items.len != arguments.items.len) {
+                return object.newError(
+                    alloc,
+                    "wrong number of arguments: want={}, got={}",
+                    .{ func.parameters.items.len, arguments.items.len },
+                );
+            }
+            const extendedEnv = try extendFunctionEnv(alloc, func, arguments);
+            const evaluated = try func.body.eval(alloc, extendedEnv);
+            return unwrapReturnValue(evaluated);
+        },
+        else => @panic("not a func"),
+    }
+}
+
+fn unwrapReturnValue(obj: *Object) *Object {
+    switch (obj.*) {
+        .Return => |returnValue| return returnValue.value,
+        else => return obj,
+    }
+}
+
+fn extendFunctionEnv(
+    alloc: std.mem.Allocator,
+    function: *object.Function,
+    arguments: std.ArrayList(*Object),
+) anyerror!*environment {
+    const envPtr = try alloc.create(environment);
+    envPtr.* = environment.newEnclose(alloc, function.env);
+    for (function.parameters.items, 0..) |param, i| {
+        try envPtr.insert(param.name, arguments.items[i]);
+    }
+
+    return envPtr;
+}
 
 pub const Program = struct {
     statements: std.ArrayList(Statement),
@@ -338,9 +397,8 @@ pub const Program = struct {
     }
     pub fn eval(self: Program, alloc: std.mem.Allocator, env: *environment) !*Object {
         var result: *object.Object = &inbuilt.NULL_OBJECT;
-        var i: usize = 0;
-        while (i < self.statements.items.len) : (i += 1) {
-            const evaled = try self.statements.items[i].eval(alloc, env);
+        for (self.statements.items) |stmt| {
+            const evaled = try stmt.eval(alloc, env);
             if (object.isReturnTag(evaled.*)) {
                 return @constCast(evaled.Return.value);
             }
@@ -349,7 +407,6 @@ pub const Program = struct {
             }
             result = evaled;
         }
-
         return result;
     }
 };

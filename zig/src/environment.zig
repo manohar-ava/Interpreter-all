@@ -19,7 +19,7 @@ pub const Environment = struct {
     pub fn newEnclose(allocator: std.mem.Allocator, outer: *Environment) Self {
         return .{
             .outer = outer,
-            .new = std.StringHashMap(*object.Object).init(allocator),
+            .env = std.StringHashMap(*object.Object).init(allocator),
             .allocator = allocator,
         };
     }
