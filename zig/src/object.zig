@@ -5,20 +5,25 @@ const ast = @import("./abstract_syntax_tree.zig");
 const String = @import("string.zig").String;
 const environment = @import("environment.zig");
 const evaluator = @import("evaluator.zig");
+const inbuilt = @import("inbuilt.zig");
 const testing = std.testing;
 
 pub const Object = union(enum) {
     Integer: Integer,
     Boolean: Boolean,
+    StringLiteral: StringLiteral,
     Null: Null,
     Return: Return,
     Error: Error,
     Function: Function,
+    InBuiltFunction: InBuiltFunction,
+    ArrayLiteral: ArrayLiteral,
     pub fn getType(self: Object) []const u8 {
         return switch (self) {
             .Integer => "INT",
             .Boolean => "BOOL",
-            inline else => "unknown type",
+            .StringLiteral => "STRING",
+            inline else => "Invalid Type",
         };
     }
     pub fn stringValue(self: *const Object, buf: *String) !void {
@@ -69,6 +74,14 @@ pub const Integer = struct {
         try buf.concat(intString);
     }
 };
+
+pub const StringLiteral = struct {
+    value: []const u8,
+    pub fn stringValue(self: *const StringLiteral, buf: *String) String.Error!void {
+        try buf.concat(self.value);
+    }
+};
+
 pub const Boolean = struct {
     value: bool,
     pub fn stringValue(self: *const Boolean, buf: *String) String.Error!void {
@@ -111,6 +124,32 @@ pub const Function = struct {
     }
 };
 
+pub const InBuiltFunction = struct {
+    function: inbuilt.InBuiltFunction,
+    pub fn call(self: InBuiltFunction, allocator: std.mem.Allocator, args: std.ArrayList(*Object)) !*Object {
+        return try self.function.call(allocator, args);
+    }
+
+    pub fn stringValue(self: InBuiltFunction, buf: *String) String.Error!void {
+        try buf.concat("InBuiltFunction::");
+        try buf.concat(@tagName(self.function));
+    }
+};
+
+pub const ArrayLiteral = struct {
+    elements: std.ArrayList(*Object),
+    pub fn stringValue(self: ArrayLiteral, buf: *String) String.Error!void {
+        try buf.concat("[");
+        for (self.elements.items, 1..) |ele, index| {
+            try ele.stringValue(buf);
+            if (index < self.elements.items.len) {
+                try buf.concat(", ");
+            }
+        }
+        try buf.concat("]");
+    }
+};
+
 pub fn newFunction(
     allocator: std.mem.Allocator,
     parameters: std.ArrayList(ast.Identifier),
@@ -140,6 +179,22 @@ pub fn newInteger(allocator: std.mem.Allocator, value: i64) !*Object {
     return integerPtr;
 }
 
+pub fn newString(allocator: std.mem.Allocator, value: []const u8) !*Object {
+    const stringPtr = try allocator.create(Object);
+    stringPtr.* = Object{
+        .StringLiteral = StringLiteral{ .value = value },
+    };
+    return stringPtr;
+}
+
+pub fn newArray(allocator: std.mem.Allocator, elements: std.ArrayList(*Object)) !*Object {
+    const arrayPtr = try allocator.create(Object);
+    arrayPtr.* = Object{
+        .ArrayLiteral = ArrayLiteral{ .elements = elements },
+    };
+    return arrayPtr;
+}
+
 pub fn testEval(allocator: *std.mem.Allocator, input: []const u8) !*Object {
     const lex = try Lexer.newLexer(allocator, input);
     var parser = try Parser.newParser(allocator, lex);
@@ -152,6 +207,70 @@ const TestType = struct {
     input: []const u8,
     expected: []const u8,
 };
+
+test "test ArrayLiteral and indexOp" {
+    const tests: [8]TestType = [_]TestType{
+        .{ .input = "[1,1+1,4-1,false,\"yello\"]", .expected = "[1, 2, 3, false, yello]" },
+        .{ .input = "[1,1+1,4-1,false,\"yello\"][1]", .expected = "2" },
+        .{ .input = "[1,1+1,4-1,false,\"yello\"][-1]", .expected = "null" },
+        .{ .input = "[1,1+1,4-1,false,\"yello\"][100]", .expected = "null" },
+        .{ .input = "[1,1+1,4-1,false,\"yello\"][1+3]", .expected = "yello" },
+        .{ .input = "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];", .expected = "6" },
+        .{
+            .input = "[1,1+1,4-1,false,\"yello\"][\"x\"]",
+            .expected = "Error: evaluated index type expected:INTEGER , got:STRING",
+        },
+        .{ .input = "1[1]", .expected = "Error: Cannot index on type: INT" },
+    };
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, t.input);
+        var printBuf = String.init(allocator);
+        try evalValue.stringValue(&printBuf);
+        try std.testing.expect(std.mem.eql(u8, t.expected, printBuf.str()));
+    }
+}
+
+test "test inbuiltFunctions" {
+    const tests: [4]TestType = [_]TestType{
+        .{ .input = "len(\"1234\")", .expected = "4" },
+        .{ .input = "len(\"yello world!\")", .expected = "12" },
+        .{
+            .input = "len(\"yello\",\"world!\")",
+            .expected = "Error: wrong Number Of Arguments. Expected=1, Received=2",
+        },
+        .{ .input = "len(1234)", .expected = "Error: func::len does not support type: INT" },
+    };
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, t.input);
+        var printBuf = String.init(allocator);
+        try evalValue.stringValue(&printBuf);
+        try std.testing.expect(std.mem.eql(u8, t.expected, printBuf.str()));
+    }
+}
+
+test "test strings" {
+    const tests: [4]TestType = [_]TestType{
+        .{ .input = "\"hello world\"", .expected = "hello world" },
+        .{ .input = "let gh = func(){\"yolo\"}; gh();", .expected = "yolo" },
+        .{ .input = "\"yello\" + \"world\"", .expected = "yelloworld" },
+        .{ .input = "\"yello\" - \"world\"", .expected = "Error: Unknown Operator: STRING - STRING" },
+    };
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, t.input);
+        var printBuf = String.init(allocator);
+        try evalValue.stringValue(&printBuf);
+        try std.testing.expect(std.mem.eql(u8, t.expected, printBuf.str()));
+    }
+}
 
 test "test return evaluation" {
     const tests: [7]TestType = [_]TestType{
@@ -315,26 +434,5 @@ test "test counter" {
     const evalValue = try testEval(&allocator, input);
     var printBuf = String.init(allocator);
     try evalValue.stringValue(&printBuf);
-    try std.testing.expect(std.mem.eql(u8, "true", printBuf.str()));
-}
-
-test "test fib" {
-    const input =
-        \\ let fibonacci = func(x) {
-        \\     if (x == 1) {
-        \\       return 1;
-        \\     } else {
-        \\       fibonacci(x - 1) + fibonacci(x - 2);
-        \\     }
-        \\ };
-        \\ fibonacci(15);
-    ;
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    var allocator = arena.allocator();
-    const evalValue = try testEval(&allocator, input);
-    var printBuf = String.init(allocator);
-    try evalValue.stringValue(&printBuf);
-    std.debug.print("{s}\n", .{printBuf.str()});
     try std.testing.expect(std.mem.eql(u8, "true", printBuf.str()));
 }

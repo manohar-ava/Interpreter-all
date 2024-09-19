@@ -128,6 +128,7 @@ pub const Parser = struct {
     fn parsePrefixExpression(self: *Self) !ast.Expression {
         return switch (self.curToken) {
             .ident => ast.Expression{ .identifier = ast.Identifier{ .name = self.curToken.getIdentValue() } },
+            .string => |val| ast.Expression{ .string_literal = ast.StringLiteral{ .value = val } },
             .bool_true, .bool_false => ast.Expression{
                 .boolean_exp = ast.BooleanExpression{ .value = self.isCurToken(tokens.bool_true) },
             },
@@ -208,6 +209,9 @@ pub const Parser = struct {
                     .parameters = parameters,
                 } };
             },
+            .l_sq_bracket => ast.Expression{ .array_literal = .{
+                .elements = try self.parseArguments(.r_sq_bracket),
+            } },
             else => @panic("prefix exp parsing"),
         };
     }
@@ -227,8 +231,18 @@ pub const Parser = struct {
             },
             .lparen => ast.Expression{ .call_exp = .{
                 .function = leftExp,
-                .arguments = try self.parseArguments(),
+                .arguments = try self.parseArguments(.rparen),
             } },
+            .l_sq_bracket => {
+                self.nextToken();
+                const indexPtr = try self.allocator.create(ast.Expression);
+                indexPtr.* = try self.parseExpression(Precedences.lowest.intVal());
+                if (!self.isPeekToken(tokens.r_sq_bracket)) {
+                    try self.appendPeekError(tokens.r_sq_bracket);
+                }
+                self.nextToken();
+                return ast.Expression{ .index_exp = .{ .left = leftExp, .index = indexPtr } };
+            },
             else => @panic("infix exp parsing"),
         };
     }
@@ -261,9 +275,9 @@ pub const Parser = struct {
         self.nextToken();
         return params;
     }
-    fn parseArguments(self: *Self) !std.ArrayList(ast.Expression) {
+    fn parseArguments(self: *Self, endToken: tokens) !std.ArrayList(ast.Expression) {
         var args = std.ArrayList(ast.Expression).init(self.allocator.*);
-        if (self.isPeekToken(tokens.rparen)) {
+        if (self.isPeekToken(endToken)) {
             self.nextToken();
             return args;
         }
@@ -274,8 +288,8 @@ pub const Parser = struct {
             self.nextToken(); // jump comma
             try args.append(try self.parseExpression(Precedences.lowest.intVal()));
         }
-        if (!self.isPeekToken(tokens.rparen)) {
-            try self.appendPeekError(tokens.rparen);
+        if (!self.isPeekToken(endToken)) {
+            try self.appendPeekError(endToken);
         }
         self.nextToken();
         return args;
@@ -302,6 +316,40 @@ fn getProgramForTest(allocator: *std.mem.Allocator, input: []const u8) anyerror!
         try stmts.append(printBuf);
     }
     return stmts;
+}
+
+test "test array literal" {
+    const input =
+        \\[1,2+4,3-1,"hello",false];
+        \\[1,3,4][1];
+        \\[1,3,true][a+b];
+    ;
+    const strings: [3][]const u8 = .{
+        "[1, (2 + 4), (3 - 1), \"hello\", false]",
+        "([1, 3, 4][1])",
+        "([1, 3, true][(a + b)])",
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const opStrings = try getProgramForTest(&allocator, input);
+    for (opStrings.items, 0..) |value, index| {
+        try std.testing.expect(std.mem.eql(u8, strings[index], value.str()));
+    }
+}
+
+test "test string literal" {
+    const input =
+        \\"yello world!!";
+    ;
+    const strings: [1][]const u8 = .{"\"yello world!!\""};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const opStrings = try getProgramForTest(&allocator, input);
+    for (opStrings.items, 0..) |value, index| {
+        try std.testing.expect(std.mem.eql(u8, strings[index], value.str()));
+    }
 }
 
 test "test function literal" {

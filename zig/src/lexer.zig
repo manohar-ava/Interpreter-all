@@ -62,6 +62,13 @@ pub const Lexer = struct {
             '*' => .asterisk,
             '<' => .lesserThan,
             '>' => .greaterThan,
+            ']' => .r_sq_bracket,
+            '[' => .l_sq_bracket,
+            '"' => {
+                const stringToken = token.tokens{ .string = self.readString() };
+                try self.readChar();
+                return stringToken;
+            },
             else => {
                 return if (isLetter(self.ch)) {
                     const ident = self.readIdentifier();
@@ -90,6 +97,14 @@ pub const Lexer = struct {
     fn readIdentifier(self: *Lexer) []const u8 {
         const pos = self.position;
         while (isLetter(self.ch)) {
+            try self.readChar();
+        }
+        return self.input[pos..self.position];
+    }
+    fn readString(self: *Lexer) []const u8 {
+        const pos = self.position + 1;
+        try self.readChar();
+        while (self.ch != '"') {
             try self.readChar();
         }
         return self.input[pos..self.position];
@@ -134,6 +149,9 @@ test "Test next tokens" {
         \\}
         \\1 == 1;
         \\1 != 0;
+        \\"lol"
+        \\"praise the lord"
+        \\[1,true]
     ;
 
     const tests = [_]token.tokens{
@@ -210,6 +228,13 @@ test "Test next tokens" {
         .not_equal_to,
         .{ .int = "0" },
         .semicolon,
+        .{ .string = "lol" },
+        .{ .string = "praise the lord" },
+        .l_sq_bracket,
+        .{ .int = "1" },
+        .comma,
+        .bool_true,
+        .r_sq_bracket,
         .eof,
     };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -219,7 +244,6 @@ test "Test next tokens" {
     defer allocator.destroy(lex);
     for (tests) |value| {
         const tok = lex.nextToken();
-        // print(" {} {} \n", .{ value, tok });
         try std.testing.expectEqualDeep(value, tok);
     }
 }

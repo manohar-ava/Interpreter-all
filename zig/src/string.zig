@@ -1,3 +1,5 @@
+//all hail https://github.com/JakubSzark/zig-string
+//used his/her string helper, give the repo a star.
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");

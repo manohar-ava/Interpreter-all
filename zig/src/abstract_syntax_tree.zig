@@ -33,6 +33,9 @@ pub const Expression = union(enum) {
     if_exp: IfExpression,
     fn_literal: FunctionLiteral,
     call_exp: callExpression,
+    string_literal: StringLiteral,
+    array_literal: ArrayLiteral,
+    index_exp: IndexExpression,
     pub fn stringValue(self: *const Expression, buf: *String) !void {
         return switch (self.*) {
             inline else => |item| try item.stringValue(buf),
@@ -90,9 +93,11 @@ pub const Identifier = struct {
     pub fn eval(self: Identifier, alloc: std.mem.Allocator, env: *environment) !*Object {
         if (env.get(self.name)) |item| {
             return item;
-        } else {
-            return object.newError(alloc, "Unknown Identifier: {s}", .{self.name});
         }
+        if (inbuilt.getInBuiltFnRef(self.name)) |inBuiltFnRef| {
+            return inBuiltFnRef;
+        }
+        return object.newError(alloc, "Unknown Identifier: {s}", .{self.name});
     }
 };
 
@@ -106,6 +111,79 @@ pub const IntegerLiteral = struct {
         return try object.newInteger(alloc, self.value);
     }
 };
+
+pub const StringLiteral = struct {
+    value: []const u8 = undefined,
+    pub fn stringValue(self: StringLiteral, buf: *String) String.Error!void {
+        try buf.concat("\"");
+        try buf.concat(self.value);
+        try buf.concat("\"");
+    }
+    pub fn eval(self: StringLiteral, alloc: std.mem.Allocator, _: *environment) !*Object {
+        return try object.newString(alloc, self.value);
+    }
+};
+pub const ArrayLiteral = struct {
+    elements: std.ArrayList(Expression),
+    pub fn stringValue(self: ArrayLiteral, buf: *String) String.Error!void {
+        try buf.concat("[");
+        for (self.elements.items, 1..) |ele, index| {
+            try ele.stringValue(buf);
+            if (index < self.elements.items.len) {
+                try buf.concat(", ");
+            }
+        }
+        try buf.concat("]");
+    }
+    pub fn eval(self: ArrayLiteral, alloc: std.mem.Allocator, env: *environment) !*Object {
+        var elementsOb = std.ArrayList(*Object).init(alloc);
+        for (self.elements.items) |ele| {
+            const evaled = try ele.eval(alloc, env);
+            switch (evaled.*) {
+                .Error => return evaled,
+                else => {},
+            }
+            try elementsOb.append(evaled);
+        }
+        return object.newArray(alloc, elementsOb);
+    }
+};
+
+pub const IndexExpression = struct {
+    left: *Expression,
+    index: *Expression,
+    pub fn stringValue(self: IndexExpression, buf: *String) String.Error!void {
+        try buf.concat("(");
+        try self.left.stringValue(buf);
+        try buf.concat("[");
+        try self.index.stringValue(buf);
+        try buf.concat("])");
+    }
+    pub fn eval(self: *const IndexExpression, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
+        const leftVal = try self.left.eval(alloc, env);
+        const index = try self.index.eval(alloc, env);
+        return switch (leftVal.*) {
+            .ArrayLiteral => |*arr| switch (index.*) {
+                .Integer => |*int| try evalArrayIndexExpression(arr, int),
+                else => object.newError(
+                    alloc,
+                    "evaluated index type expected:INTEGER , got:{s}",
+                    .{index.getType()},
+                ),
+            },
+            else => object.newError(alloc, "Cannot index on type: {s}", .{leftVal.getType()}),
+        };
+    }
+};
+
+fn evalArrayIndexExpression(array: *object.ArrayLiteral, index: *object.Integer) !*Object {
+    const arrayLength = array.elements.items.len;
+    if (index.value < 0 or index.value >= arrayLength) {
+        return &inbuilt.NULL_OBJECT;
+    }
+    const idx: usize = @intCast(index.value);
+    return array.elements.items[idx];
+}
 
 pub const PrefixExpression = struct {
     operator: token.tokens = undefined,
@@ -182,6 +260,7 @@ pub const InfixExpression = struct {
         }
         return switch (right.*) {
             .Integer => evalIntergerInfix(alloc, self.operator, left, right),
+            .StringLiteral => evalStringInfix(alloc, self.operator, left, right),
             inline else => object.newError(alloc, "Unknown Operator: {s} {s} {s}", .{
                 left.getType(),
                 self.operator.toString(),
@@ -190,6 +269,38 @@ pub const InfixExpression = struct {
         };
     }
 };
+
+pub fn evalStringInfix(
+    alloc: std.mem.Allocator,
+    operator: token.tokens,
+    left: *const Object,
+    right: *const Object,
+) !*Object {
+    const rightValue = switch (right.*) {
+        .StringLiteral => |item| item.value,
+        else => @panic("not a string"),
+    };
+    const leftValue = switch (left.*) {
+        .StringLiteral => |item| item.value,
+        else => @panic("not a string"),
+    };
+    return switch (operator) {
+        .plus => {
+            const slices = &[_][]const u8{ leftValue, rightValue };
+            const combined = try std.mem.concat(alloc, u8, slices);
+            const objectPtr = try alloc.create(Object);
+            objectPtr.* = Object{
+                .StringLiteral = object.StringLiteral{ .value = combined },
+            };
+            return objectPtr;
+        },
+        else => object.newError(alloc, "Unknown Operator: {s} {s} {s}", .{
+            left.getType(),
+            operator.toString(),
+            right.getType(),
+        }),
+    };
+}
 
 pub fn evalIntergerInfix(
     alloc: std.mem.Allocator,
@@ -350,7 +461,7 @@ fn applyFunction(
     function: *Object,
     arguments: std.ArrayList(*Object),
 ) !*object.Object {
-    switch (function.*) {
+    return switch (function.*) {
         .Function => |*func| {
             if (func.parameters.items.len != arguments.items.len) {
                 return object.newError(
@@ -363,8 +474,9 @@ fn applyFunction(
             const evaluated = try func.body.eval(alloc, extendedEnv);
             return unwrapReturnValue(evaluated);
         },
+        .InBuiltFunction => |func| try func.call(alloc, arguments),
         else => @panic("not a func"),
-    }
+    };
 }
 
 fn unwrapReturnValue(obj: *Object) *Object {

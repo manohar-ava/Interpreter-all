@@ -9,6 +9,7 @@ pub const Precedences = enum {
     product,
     prefix,
     call,
+    index,
     pub fn intVal(self: Precedences) i32 {
         return switch (self) {
             .lowest => @intFromEnum(Precedences.lowest),
@@ -18,12 +19,14 @@ pub const Precedences = enum {
             .product => @intFromEnum(Precedences.product),
             .prefix => @intFromEnum(Precedences.prefix),
             .call => @intFromEnum(Precedences.call),
+            .index => @intFromEnum(Precedences.index),
         };
     }
 };
 pub const tokens = union(enum) {
     ident: []const u8,
     int: []const u8,
+    string: []const u8,
     illegal,
     eof,
     assign,
@@ -34,6 +37,8 @@ pub const tokens = union(enum) {
     rparen,
     lbrace,
     rbrace,
+    l_sq_bracket,
+    r_sq_bracket,
     function,
     bool_true,
     bool_false,
@@ -60,7 +65,7 @@ pub const tokens = union(enum) {
             .greaterThan => try buf.concat(">"),
             .not_equal_to => try buf.concat("!="),
             .equal_to => try buf.concat("=="),
-            .ident, .int => |val| try buf.concat(val),
+            .ident, .int, .string => |val| try buf.concat(val),
             .semicolon => try buf.concat(";"),
             .bool_true => try buf.concat("true"),
             .bool_false => try buf.concat("false"),
@@ -72,6 +77,8 @@ pub const tokens = union(enum) {
             .else_stmt => try buf.concat("else"),
             .function => try buf.concat("func"),
             .assign => try buf.concat("="),
+            .l_sq_bracket => try buf.concat("["),
+            .r_sq_bracket => try buf.concat("]"),
             else => {},
         }
     }
@@ -101,18 +108,30 @@ pub const tokens = union(enum) {
             .slash => Precedences.product.intVal(),
             .asterisk => Precedences.product.intVal(),
             .lparen => Precedences.call.intVal(),
+            .l_sq_bracket => Precedences.index.intVal(),
             else => Precedences.lowest.intVal(),
         };
     }
     pub fn isPrefix(self: tokens) bool {
         return switch (self) {
-            .int, .ident, .minus, .bang, .bool_true, .bool_false, .lparen, .if_stmt, .function => true,
+            .int,
+            .ident,
+            .minus,
+            .bang,
+            .bool_true,
+            .bool_false,
+            .lparen,
+            .if_stmt,
+            .function,
+            .string,
+            .l_sq_bracket,
+            => true,
             else => false,
         };
     }
     pub fn getIdentValue(self: tokens) []const u8 {
         return switch (self) {
-            .ident => |val| val,
+            .ident, .string => |val| val,
             else => "",
         };
     }
