@@ -1,5 +1,6 @@
 const std = @import("std");
 const object = @import("object.zig");
+const String = @import("string.zig").String;
 
 pub const TRUE = object.Boolean{ .value = true };
 pub const FALSE = object.Boolean{ .value = false };
@@ -8,14 +9,22 @@ pub const NULL = object.Null{};
 pub var TRUE_OBJECT = object.Object{ .Boolean = TRUE };
 pub var FALSE_OBJECT = object.Object{ .Boolean = FALSE };
 pub var NULL_OBJECT = object.Object{ .Null = NULL };
+
 pub var FUNCTION_LEN_OBJECT = object.Object{
     .InBuiltFunction = .{
         .function = InBuiltFunction.len,
     },
 };
+
 pub var FUNCTION_PUSH_OBJECT = object.Object{
     .InBuiltFunction = .{
         .function = InBuiltFunction.push,
+    },
+};
+
+pub var FUNCTION_LOG_OBJECT = object.Object{
+    .InBuiltFunction = .{
+        .function = InBuiltFunction.log,
     },
 };
 
@@ -26,18 +35,21 @@ pub fn getInBuiltFnRef(fnName: []const u8) ?*object.Object {
     if (std.mem.eql(u8, fnName, "push")) {
         return &FUNCTION_PUSH_OBJECT;
     }
+    if (std.mem.eql(u8, fnName, "log")) {
+        return &FUNCTION_LOG_OBJECT;
+    }
     return null;
 }
 
 pub const InBuiltFunction = enum {
     len,
     push,
-    // puts,
+    log,
     pub fn call(self: InBuiltFunction, allocator: std.mem.Allocator, args: std.ArrayList(*object.Object)) !*object.Object {
         return switch (self) {
             .len => try len(allocator, args),
             .push => try push(allocator, args),
-            // .puts => try puts(allocator, args),
+            .log => try log(allocator, args),
         };
     }
 };
@@ -79,6 +91,17 @@ fn len(alloc: std.mem.Allocator, args: std.ArrayList(*object.Object)) !*object.O
             .{args.items[0].getType()},
         ),
     }
+}
+
+fn log(allocator: std.mem.Allocator, args: std.ArrayList(*object.Object)) !*object.Object {
+    var buffer = String.init(allocator);
+    // defer buffer.deinit();
+    var i: usize = 0;
+    while (i < args.items.len) : (i += 1) {
+        try args.items[i].stringValue(&buffer);
+    }
+    std.debug.print("{s}\n", .{buffer.str()});
+    return &NULL_OBJECT;
 }
 
 fn checkArgumentsLen(alloc: std.mem.Allocator, expect: usize, args: std.ArrayList(*object.Object)) !?*object.Object {

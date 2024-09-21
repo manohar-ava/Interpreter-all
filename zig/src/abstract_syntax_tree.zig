@@ -36,6 +36,7 @@ pub const Expression = union(enum) {
     string_literal: StringLiteral,
     array_literal: ArrayLiteral,
     index_exp: IndexExpression,
+    hash_literal: HashLiteral,
     pub fn stringValue(self: *const Expression, buf: *String) !void {
         return switch (self.*) {
             inline else => |item| try item.stringValue(buf),
@@ -171,8 +172,75 @@ pub const IndexExpression = struct {
                     .{index.getType()},
                 ),
             },
+            .HashLiteral => |*hash| {
+                const hashKey = convertToHashableFromObject(index.*);
+                if (hashKey) |key| {
+                    if (hash.*.get(key)) |value| {
+                        return value;
+                    } else {
+                        return &inbuilt.NULL_OBJECT;
+                    }
+                } else {
+                    return try object.newError(alloc, "unusable as hash key: {s}", .{index.getType()});
+                }
+            },
             else => object.newError(alloc, "Cannot index on type: {s}", .{leftVal.getType()}),
         };
+    }
+};
+
+fn convertToHashableFromObject(obj: object.Object) ?object.HashableObject {
+    switch (obj) {
+        .Integer => |integer| return object.HashableObject{ .integer = integer },
+        .Boolean => |boolean| return object.HashableObject{ .boolean = boolean },
+        .StringLiteral => |str| return object.HashableObject{ .string = str },
+        else => return null,
+    }
+}
+
+pub const HashLiteral = struct {
+    pairs: std.ArrayList(HashPair),
+    pub fn stringValue(self: HashLiteral, buf: *String) String.Error!void {
+        try buf.concat("{");
+        for (self.pairs.items, 1..) |pair, i| {
+            try pair.stringValue(buf);
+            if (i == self.pairs.items.len) {
+                try buf.concat("}");
+            } else {
+                try buf.concat(",");
+            }
+        }
+    }
+    pub fn eval(self: *const HashLiteral, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
+        var pairs = object.HashLiteral.HashMap.init(alloc);
+        for (self.pairs.items) |pair| {
+            const key = try pair.key.eval(alloc, env);
+            switch (key.*) {
+                .Error => return key,
+                else => {},
+            }
+            const value = try pair.value.eval(alloc, env);
+            switch (value.*) {
+                .Error => return value,
+                else => {},
+            }
+            try pairs.put(object.HashableObject.fromObject(key.*), value);
+        }
+        const objectPtr = try alloc.create(object.Object);
+        objectPtr.* = object.Object{
+            .HashLiteral = .{ .pairs = pairs },
+        };
+        return objectPtr;
+    }
+};
+
+pub const HashPair = struct {
+    key: Expression,
+    value: Expression,
+    pub fn stringValue(self: *const HashPair, buf: *String) String.Error!void {
+        try self.key.stringValue(buf);
+        try buf.concat(":");
+        try self.value.stringValue(buf);
     }
 };
 

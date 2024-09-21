@@ -12,10 +12,6 @@ const ParserError = error{
     OutOfMemory,
 };
 
-pub fn dbg(stmt: ast.Statement) void {
-    std.debug.print("{}\n", .{stmt});
-}
-
 pub const Parser = struct {
     const Self = @This();
     l: *lexer.Lexer,
@@ -212,6 +208,34 @@ pub const Parser = struct {
             .l_sq_bracket => ast.Expression{ .array_literal = .{
                 .elements = try self.parseArguments(.r_sq_bracket),
             } },
+            .lbrace => {
+                var pairs = std.ArrayList(ast.HashPair).init(self.allocator.*);
+                while (!self.isPeekToken(tokens.rbrace)) {
+                    self.nextToken();
+                    const key = try self.parseExpression(Precedences.lowest.intVal());
+                    if (!self.isPeekToken(tokens.colon)) {
+                        try self.appendPeekError(tokens.colon);
+                    }
+                    if (self.isCurToken(tokens.eof)) {
+                        break;
+                    }
+                    self.nextToken();
+                    self.nextToken();
+                    const value = try self.parseExpression(Precedences.lowest.intVal());
+                    try pairs.append(.{ .key = key, .value = value });
+                    if (!self.isPeekToken(tokens.rbrace)) {
+                        if (!self.isPeekToken(tokens.comma)) {
+                            try self.appendPeekError(tokens.comma);
+                        }
+                        self.nextToken();
+                    }
+                }
+                if (!self.isPeekToken(tokens.rbrace)) {
+                    try self.appendPeekError(tokens.rbrace);
+                }
+                self.nextToken();
+                return ast.Expression{ .hash_literal = .{ .pairs = pairs } };
+            },
             else => @panic("prefix exp parsing"),
         };
     }
@@ -316,6 +340,24 @@ fn getProgramForTest(allocator: *std.mem.Allocator, input: []const u8) anyerror!
         try stmts.append(printBuf);
     }
     return stmts;
+}
+
+test "test hashmap" {
+    const input =
+        \\{"key":"value","k":"v"};
+        \\{1:2,1<2:"yes"};
+    ;
+    const strings: [2][]const u8 = .{
+        "{\"key\":\"value\",\"k\":\"v\"}",
+        "{1:2,(1 < 2):\"yes\"}",
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const opStrings = try getProgramForTest(&allocator, input);
+    for (opStrings.items, 0..) |value, index| {
+        try std.testing.expect(std.mem.eql(u8, strings[index], value.str()));
+    }
 }
 
 test "test array literal" {

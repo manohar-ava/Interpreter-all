@@ -18,12 +18,19 @@ pub const Object = union(enum) {
     Function: Function,
     InBuiltFunction: InBuiltFunction,
     ArrayLiteral: ArrayLiteral,
+    HashLiteral: HashLiteral,
     pub fn getType(self: Object) []const u8 {
         return switch (self) {
             .Integer => "INT",
             .Boolean => "BOOL",
             .StringLiteral => "STRING",
-            inline else => "Invalid Type",
+            .Null => "NULL",
+            .Return => "RETURN",
+            .Function => "FUNCTION",
+            .InBuiltFunction => "INBUILTFUNC",
+            .ArrayLiteral => "ARRAYLITERAL",
+            .HashLiteral => "HASHLITERAL",
+            else => "Invalid Type",
         };
     }
     pub fn stringValue(self: *const Object, buf: *String) !void {
@@ -150,6 +157,88 @@ pub const ArrayLiteral = struct {
     }
 };
 
+pub const HashableObject = union(enum) {
+    integer: Integer,
+    boolean: Boolean,
+    string: StringLiteral,
+
+    pub fn fromObject(object: Object) HashableObject {
+        return switch (object) {
+            .Integer => |integer| .{ .integer = integer },
+            .Boolean => |boolean| .{ .boolean = boolean },
+            .StringLiteral => |str| .{ .string = str },
+            else => unreachable,
+        };
+    }
+
+    pub fn stringValue(self: HashableObject, buf: *String) String.Error!void {
+        switch (self) {
+            .integer => |integer| try integer.stringValue(buf),
+            .boolean => |boolean| try boolean.stringValue(buf),
+            .string => |str| try str.stringValue(buf),
+        }
+    }
+};
+
+pub const HashLiteral = struct {
+    pub const HashMap = std.HashMap(
+        HashableObject,
+        *Object,
+        HashContext,
+        std.hash_map.default_max_load_percentage,
+    );
+
+    pub const HashContext = struct {
+        pub fn eql(_: HashContext, obj1: HashableObject, obj2: HashableObject) bool {
+            return switch (obj1) {
+                .integer => |integer| switch (obj2) {
+                    .integer => |integer2| integer.value == integer2.value,
+                    else => false,
+                },
+                .boolean => |boolean| switch (obj2) {
+                    .boolean => |boolean2| boolean.value == boolean2.value,
+                    else => false,
+                },
+                .string => |str1| switch (obj2) {
+                    .string => |str2| std.mem.eql(u8, str1.value, str2.value),
+                    else => false,
+                },
+            };
+        }
+
+        pub fn hash(_: HashContext, obj: HashableObject) u64 {
+            return switch (obj) {
+                .integer => |integer| (std.hash_map.AutoContext(i64){}).hash(integer.value),
+                .boolean => |boolean| (std.hash_map.AutoContext(bool){}).hash(boolean.value),
+                .string => |str| (std.hash_map.StringContext{}).hash(str.value),
+            };
+        }
+    };
+
+    pairs: HashMap,
+
+    pub fn get(self: HashLiteral, key: HashableObject) ?*Object {
+        return self.pairs.get(key);
+    }
+
+    pub fn stringValue(self: HashLiteral, buf: *String) String.Error!void {
+        try buf.concat("{");
+        var it = self.pairs.iterator();
+        const len = self.pairs.count();
+        var i: usize = 0;
+        while (it.next()) |pair| {
+            try pair.key_ptr.*.stringValue(buf);
+            try buf.concat(":");
+            try pair.value_ptr.*.stringValue(buf);
+            if (i != len - 1) {
+                try buf.concat(", ");
+            }
+            i += 1;
+        }
+        try buf.concat("}");
+    }
+};
+
 pub fn newFunction(
     allocator: std.mem.Allocator,
     parameters: std.ArrayList(ast.Identifier),
@@ -208,6 +297,29 @@ const TestType = struct {
     expected: []const u8,
 };
 
+test "test hashLiteral and indexOp" {
+    const tests: [7]TestType = [_]TestType{
+        .{ .input = "{1:2+4,\"key\":false}", .expected = "{1:6, key:false}" },
+        .{ .input = "{1:2+4,\"key\":false}[1]", .expected = "6" },
+        .{ .input = "{1:2+4,\"key\":false}[3]", .expected = "null" },
+        .{ .input = "let k = 1; {1:2+4,\"key\":false}[k]", .expected = "6" },
+        .{ .input = "{}[1]", .expected = "null" },
+        .{ .input = "{1:2}[func(x){x}]", .expected = "Error: unusable as hash key: FUNCTION" },
+        .{ .input = 
+        \\ let two = "two";{ "one": 10 - 9,two: 2,"thr" + "ee": 6 / 2,4: 5,true: 6,false: 7}
+        , .expected = "{false:7, one:1, three:3, 4:5, two:2, true:6}" },
+    };
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var allocator = arena.allocator();
+        const evalValue = try testEval(&allocator, t.input);
+        var printBuf = String.init(allocator);
+        try evalValue.stringValue(&printBuf);
+        try std.testing.expect(std.mem.eql(u8, t.expected, printBuf.str()));
+    }
+}
+
 test "test ArrayLiteral and indexOp" {
     const tests: [8]TestType = [_]TestType{
         .{ .input = "[1,1+1,4-1,false,\"yello\"]", .expected = "[1, 2, 3, false, yello]" },
@@ -234,7 +346,7 @@ test "test ArrayLiteral and indexOp" {
 }
 
 test "test inbuiltFunctions" {
-    const tests: [4]TestType = [_]TestType{
+    const tests: [8]TestType = [_]TestType{
         .{ .input = "len(\"1234\")", .expected = "4" },
         .{ .input = "len(\"yello world!\")", .expected = "12" },
         .{
@@ -242,6 +354,10 @@ test "test inbuiltFunctions" {
             .expected = "Error: wrong Number Of Arguments. Expected=1, Received=2",
         },
         .{ .input = "len(1234)", .expected = "Error: func::len does not support type: INT" },
+        .{ .input = "log(\"testing log func\")", .expected = "null" },
+        .{ .input = "let x = [1,2,3]; push(push(x,4),5)", .expected = "[1, 2, 3, 4, 5]" },
+        .{ .input = "let x = [1,2,3]; let y = push(x,4); push(y,5)", .expected = "[1, 2, 3, 4, 5]" },
+        .{ .input = "push([],1)", .expected = "[1]" },
     };
     for (tests) |t| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -435,4 +551,28 @@ test "test counter" {
     var printBuf = String.init(allocator);
     try evalValue.stringValue(&printBuf);
     try std.testing.expect(std.mem.eql(u8, "true", printBuf.str()));
+}
+
+test "test fib" {
+    const input =
+        \\let fibonacci = func(x) {
+        \\if (x == 0) {
+        \\return 0;
+        \\} else {
+        \\if (x == 1) {
+        \\return 1;
+        \\} else {
+        \\fibonacci(x - 1) + fibonacci(x - 2);
+        \\}
+        \\}
+        \\};
+        \\fibonacci(15);
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const evalValue = try testEval(&allocator, input);
+    var printBuf = String.init(allocator);
+    try evalValue.stringValue(&printBuf);
+    try std.testing.expect(std.mem.eql(u8, "610", printBuf.str()));
 }

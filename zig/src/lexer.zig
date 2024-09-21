@@ -64,6 +64,7 @@ pub const Lexer = struct {
             '>' => .greaterThan,
             ']' => .r_sq_bracket,
             '[' => .l_sq_bracket,
+            ':' => .colon,
             '"' => {
                 const stringToken = token.tokens{ .string = self.readString() };
                 try self.readChar();
@@ -152,6 +153,7 @@ test "Test next tokens" {
         \\"lol"
         \\"praise the lord"
         \\[1,true]
+        \\{"key":"value"}
     ;
 
     const tests = [_]token.tokens{
@@ -235,6 +237,11 @@ test "Test next tokens" {
         .comma,
         .bool_true,
         .r_sq_bracket,
+        .lbrace,
+        .{ .string = "key" },
+        .colon,
+        .{ .string = "value" },
+        .rbrace,
         .eof,
     };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

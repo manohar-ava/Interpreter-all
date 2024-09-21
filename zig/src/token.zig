@@ -54,6 +54,7 @@ pub const tokens = union(enum) {
     lesserThan,
     equal_to,
     not_equal_to,
+    colon,
     pub fn stringValue(self: tokens, buf: *String) String.Error!void {
         switch (self) {
             .minus => try buf.concat("-"),
@@ -78,6 +79,7 @@ pub const tokens = union(enum) {
             .function => try buf.concat("func"),
             .assign => try buf.concat("="),
             .l_sq_bracket => try buf.concat("["),
+            .colon => try buf.concat(":"),
             .r_sq_bracket => try buf.concat("]"),
             else => {},
         }
@@ -125,6 +127,7 @@ pub const tokens = union(enum) {
             .function,
             .string,
             .l_sq_bracket,
+            .lbrace,
             => true,
             else => false,
         };
