@@ -111,8 +111,15 @@ pub const Lexer = struct {
         return self.input[pos..self.position];
     }
     fn skipWhiteSpace(self: *Lexer) !void {
-        if (std.ascii.isWhitespace(self.ch)) {
-            try self.readChar();
+        while (true) {
+            switch (self.ch) {
+                '\t', '\n', '\x0C', '\r', ' ' => {
+                    try self.readChar();
+                },
+                else => {
+                    break;
+                },
+            }
         }
     }
 };
