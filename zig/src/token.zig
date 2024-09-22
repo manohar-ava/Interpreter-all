@@ -1,4 +1,6 @@
 const std = @import("std");
+const String = @import("string.zig").String;
+
 pub const Precedences = enum {
     lowest,
     equals,
@@ -7,6 +9,7 @@ pub const Precedences = enum {
     product,
     prefix,
     call,
+    index,
     pub fn intVal(self: Precedences) i32 {
         return switch (self) {
             .lowest => @intFromEnum(Precedences.lowest),
@@ -16,12 +19,14 @@ pub const Precedences = enum {
             .product => @intFromEnum(Precedences.product),
             .prefix => @intFromEnum(Precedences.prefix),
             .call => @intFromEnum(Precedences.call),
+            .index => @intFromEnum(Precedences.index),
         };
     }
 };
 pub const tokens = union(enum) {
     ident: []const u8,
     int: []const u8,
+    string: []const u8,
     illegal,
     eof,
     assign,
@@ -32,6 +37,8 @@ pub const tokens = union(enum) {
     rparen,
     lbrace,
     rbrace,
+    l_sq_bracket,
+    r_sq_bracket,
     function,
     bool_true,
     bool_false,
@@ -47,31 +54,50 @@ pub const tokens = union(enum) {
     lesserThan,
     equal_to,
     not_equal_to,
-    pub fn format(self: tokens, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    colon,
+    pub fn stringValue(self: tokens, buf: *String) String.Error!void {
         switch (self) {
-            .minus => try writer.writeByte('-'),
-            .plus => try writer.writeByte('+'),
-            .bang => try writer.writeByte('!'),
-            .asterisk => try writer.writeByte('*'),
-            .slash => try writer.writeByte('/'),
-            .lesserThan => try writer.writeByte('<'),
-            .greaterThan => try writer.writeByte('>'),
-            .not_equal_to => try writer.writeAll("!="),
-            .equal_to => try writer.writeAll("=="),
-            .ident, .int => |val| try writer.writeAll(val),
-            .semicolon => try writer.writeByte(';'),
-            .bool_true => try writer.print("{}", .{true}),
-            .bool_false => try writer.print("{}", .{false}),
-            .rparen => try writer.writeByte(')'),
-            .lparen => try writer.writeByte('('),
-            .lbrace => try writer.writeByte('{'),
-            .rbrace => try writer.writeByte('}'),
-            .if_stmt => try writer.writeAll("if"),
-            .else_stmt => try writer.writeAll("else"),
-            .function => try writer.writeAll("func"),
-            .assign => try writer.writeByte('='),
+            .minus => try buf.concat("-"),
+            .plus => try buf.concat("+"),
+            .bang => try buf.concat("!"),
+            .asterisk => try buf.concat("*"),
+            .slash => try buf.concat("/"),
+            .lesserThan => try buf.concat("<"),
+            .greaterThan => try buf.concat(">"),
+            .not_equal_to => try buf.concat("!="),
+            .equal_to => try buf.concat("=="),
+            .ident, .int, .string => |val| try buf.concat(val),
+            .semicolon => try buf.concat(";"),
+            .bool_true => try buf.concat("true"),
+            .bool_false => try buf.concat("false"),
+            .rparen => try buf.concat(")"),
+            .lparen => try buf.concat("("),
+            .lbrace => try buf.concat("{"),
+            .rbrace => try buf.concat("}"),
+            .if_stmt => try buf.concat("if"),
+            .else_stmt => try buf.concat("else"),
+            .function => try buf.concat("func"),
+            .assign => try buf.concat("="),
+            .l_sq_bracket => try buf.concat("["),
+            .colon => try buf.concat(":"),
+            .r_sq_bracket => try buf.concat("]"),
             else => {},
         }
+    }
+    pub fn toString(self: tokens) []const u8 {
+        return switch (self) {
+            .assign => "=",
+            .plus => "+",
+            .minus => "-",
+            .bang => "!",
+            .asterisk => "*",
+            .slash => "/",
+            .equal_to => "==",
+            .not_equal_to => "!=",
+            .lesserThan => "<",
+            .greaterThan => ">",
+            inline else => "invalid operator",
+        };
     }
     pub fn precedence(self: tokens) i32 {
         return switch (self) {
@@ -84,18 +110,31 @@ pub const tokens = union(enum) {
             .slash => Precedences.product.intVal(),
             .asterisk => Precedences.product.intVal(),
             .lparen => Precedences.call.intVal(),
+            .l_sq_bracket => Precedences.index.intVal(),
             else => Precedences.lowest.intVal(),
         };
     }
     pub fn isPrefix(self: tokens) bool {
         return switch (self) {
-            .int, .ident, .minus, .bang, .bool_true, .bool_false, .lparen, .if_stmt, .function => true,
+            .int,
+            .ident,
+            .minus,
+            .bang,
+            .bool_true,
+            .bool_false,
+            .lparen,
+            .if_stmt,
+            .function,
+            .string,
+            .l_sq_bracket,
+            .lbrace,
+            => true,
             else => false,
         };
     }
     pub fn getIdentValue(self: tokens) []const u8 {
         return switch (self) {
-            .ident => |val| val,
+            .ident, .string => |val| val,
             else => "",
         };
     }
