@@ -4,11 +4,15 @@ const String = @import("string.zig").String;
 
 pub const TRUE = object.Boolean{ .value = true };
 pub const FALSE = object.Boolean{ .value = false };
+pub const BREAK = object.Break{};
+pub const CONTINUE = object.Continue{};
 pub const NULL = object.Null{};
 
 pub var TRUE_OBJECT = object.Object{ .Boolean = TRUE };
 pub var FALSE_OBJECT = object.Object{ .Boolean = FALSE };
 pub var NULL_OBJECT = object.Object{ .Null = NULL };
+pub var BREAK_OBJECT = object.Object{ .Break = BREAK };
+pub var CONTINUE_OBJECT = object.Object{ .Continue = CONTINUE };
 
 pub var FUNCTION_LEN_OBJECT = object.Object{
     .InBuiltFunction = .{

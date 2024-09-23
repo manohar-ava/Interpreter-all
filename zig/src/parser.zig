@@ -59,8 +59,42 @@ pub const Parser = struct {
         return switch (self.curToken) {
             .let => .{ .let = try self.parseLetStatement() },
             .return_stmt => .{ .return_stmt = try self.parseReturnStatement() },
+            .while_loop => .{ .while_stmt = try self.parseWhileStatement() },
+            .break_loop => .{ .break_stmt = self.parseBreakStatement() },
+            .continue_loop => .{ .continue_stmt = self.parseContinueStatement() },
             else => return .{ .expression_stmt = try self.parseExpressionStatement() },
         };
+    }
+
+    fn parseBreakStatement(self: *Self) ast.BreakStatement {
+        const tok = self.curToken;
+        if (self.isPeekToken(tokens.semicolon)) {
+            self.nextToken();
+        }
+        return ast.BreakStatement{ .token = tok };
+    }
+
+    fn parseContinueStatement(self: *Self) ast.ContinueStatement {
+        const tok = self.curToken;
+        if (self.isPeekToken(tokens.semicolon)) {
+            self.nextToken();
+        }
+        return ast.ContinueStatement{ .token = tok };
+    }
+
+    fn parseWhileStatement(self: *Self) !ast.WhileStatement {
+        if (!self.isPeekToken(tokens.lparen)) {
+            try self.appendPeekError(tokens.lparen);
+        }
+        self.nextToken();
+        const conditionExp = try self.allocator.create(ast.Expression);
+        conditionExp.* = try self.parseExpression(Precedences.lowest.intVal());
+        if (!self.isPeekToken(tokens.lbrace)) {
+            try self.appendPeekError(tokens.lbrace);
+        }
+        self.nextToken();
+        const whileBlock = try self.parseBlockStatement();
+        return ast.WhileStatement{ .condition = conditionExp, .whileBlock = whileBlock };
     }
 
     pub fn parseReturnStatement(self: *Self) !ast.ReturnStatement {
@@ -123,7 +157,25 @@ pub const Parser = struct {
     }
     fn parsePrefixExpression(self: *Self) !ast.Expression {
         return switch (self.curToken) {
-            .ident => ast.Expression{ .identifier = ast.Identifier{ .name = self.curToken.getIdentValue() } },
+            .ident => {
+                if (self.isPeekToken(tokens.assign)) {
+                    const ident = ast.Identifier{
+                        .name = self.curToken.getIdentValue(),
+                    };
+                    if (!self.isPeekToken(tokens.assign)) {
+                        try self.appendPeekError(tokens.assign);
+                    }
+                    self.nextToken(); // jump to =
+                    self.nextToken(); // jump to expression token
+                    const expr = try self.allocator.create(ast.Expression);
+                    expr.* = try self.parseExpression(Precedences.lowest.intVal());
+                    if (self.isPeekToken(tokens.semicolon)) {
+                        self.nextToken();
+                    }
+                    return ast.Expression{ .assignment = .{ .value = expr, .identifier = ident } };
+                }
+                return ast.Expression{ .identifier = ast.Identifier{ .name = self.curToken.getIdentValue() } };
+            },
             .string => |val| ast.Expression{ .string_literal = ast.StringLiteral{ .value = val } },
             .bool_true, .bool_false => ast.Expression{
                 .boolean_exp = ast.BooleanExpression{ .value = self.isCurToken(tokens.bool_true) },
@@ -342,6 +394,30 @@ fn getProgramForTest(allocator: *std.mem.Allocator, input: []const u8) anyerror!
     return stmts;
 }
 
+test "test whileLoop" {
+    const input =
+        \\let a = 10; 
+        \\while(a > b) {
+        \\ a = a-1;
+        \\}
+        \\while(a<b){ if(a==b-1){break} a}
+        \\while(a<b){ if(b == a+1){continue} a}
+    ;
+    const strings: [4][]const u8 = .{
+        "let a = 10",
+        "while (a > b) { a = (a - 1) }",
+        "while (a < b) { if (a == (b - 1)) { break }a }",
+        "while (a < b) { if (b == (a + 1)) { continue }a }",
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var allocator = arena.allocator();
+    const opStrings = try getProgramForTest(&allocator, input);
+    for (opStrings.items, 0..) |value, index| {
+        try std.testing.expect(std.mem.eql(u8, strings[index], value.str()));
+    }
+}
+
 test "test hashmap" {
     const input =
         \\{"key":"value","k":"v"};
@@ -452,10 +528,12 @@ test "Test let statements with expression" {
     const input =
         \\let five = ten;
         \\let ten = five;
+        \\ten = one;
     ;
-    const strings: [2][]const u8 = .{
+    const strings: [3][]const u8 = .{
         "let five = ten",
         "let ten = five",
+        "ten = one",
     };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

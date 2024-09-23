@@ -19,6 +19,8 @@ pub const Object = union(enum) {
     InBuiltFunction: InBuiltFunction,
     ArrayLiteral: ArrayLiteral,
     HashLiteral: HashLiteral,
+    Break: Break,
+    Continue: Continue,
     pub fn getType(self: Object) []const u8 {
         return switch (self) {
             .Integer => "INT",
@@ -30,6 +32,8 @@ pub const Object = union(enum) {
             .InBuiltFunction => "INBUILTFUNC",
             .ArrayLiteral => "ARRAYLITERAL",
             .HashLiteral => "HASHLITERAL",
+            .Break => "BREAK",
+            .Continue => "CONTINUE",
             else => "Invalid Type",
         };
     }
@@ -66,6 +70,18 @@ pub fn isTruthy(ob: *Object) bool {
         else => true,
     };
 }
+
+pub const Break = struct {
+    pub fn stringValue(_: *const Break, buf: *String) String.Error!void {
+        try buf.concat("break");
+    }
+};
+
+pub const Continue = struct {
+    pub fn stringValue(_: *const Continue, buf: *String) String.Error!void {
+        try buf.concat("continue");
+    }
+};
 
 pub const Return = struct {
     value: *Object,

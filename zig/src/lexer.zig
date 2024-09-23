@@ -161,6 +161,7 @@ test "Test next tokens" {
         \\"praise the lord"
         \\[1,true]
         \\{"key":"value"}
+        \\while(true){}
     ;
 
     const tests = [_]token.tokens{
@@ -248,6 +249,12 @@ test "Test next tokens" {
         .{ .string = "key" },
         .colon,
         .{ .string = "value" },
+        .rbrace,
+        .while_loop,
+        .lparen,
+        .bool_true,
+        .rparen,
+        .lbrace,
         .rbrace,
         .eof,
     };

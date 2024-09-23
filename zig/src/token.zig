@@ -55,6 +55,9 @@ pub const tokens = union(enum) {
     equal_to,
     not_equal_to,
     colon,
+    while_loop,
+    break_loop,
+    continue_loop,
     pub fn stringValue(self: tokens, buf: *String) String.Error!void {
         switch (self) {
             .minus => try buf.concat("-"),
@@ -81,6 +84,9 @@ pub const tokens = union(enum) {
             .l_sq_bracket => try buf.concat("["),
             .colon => try buf.concat(":"),
             .r_sq_bracket => try buf.concat("]"),
+            .while_loop => try buf.concat("while"),
+            .break_loop => try buf.concat("break"),
+            .continue_loop => try buf.concat("continue"),
             else => {},
         }
     }
@@ -141,7 +147,18 @@ pub const tokens = union(enum) {
 };
 
 const keyWord = struct { key: []const u8, val: tokens };
-pub const key_words = [_]keyWord{ keyWord{ .key = "func", .val = .function }, keyWord{ .key = "let", .val = .let }, keyWord{ .key = "true", .val = .bool_true }, keyWord{ .key = "false", .val = .bool_false }, keyWord{ .key = "if", .val = .if_stmt }, keyWord{ .key = "else", .val = .else_stmt }, keyWord{ .key = "return", .val = .return_stmt } };
+pub const key_words = [_]keyWord{
+    keyWord{ .key = "func", .val = .function },
+    keyWord{ .key = "let", .val = .let },
+    keyWord{ .key = "true", .val = .bool_true },
+    keyWord{ .key = "false", .val = .bool_false },
+    keyWord{ .key = "if", .val = .if_stmt },
+    keyWord{ .key = "else", .val = .else_stmt },
+    keyWord{ .key = "return", .val = .return_stmt },
+    keyWord{ .key = "while", .val = .while_loop },
+    keyWord{ .key = "break", .val = .break_loop },
+    keyWord{ .key = "continue", .val = .continue_loop },
+};
 
 pub fn lookUpIdentifer(ident: []const u8) tokens {
     for (key_words) |pair| {
