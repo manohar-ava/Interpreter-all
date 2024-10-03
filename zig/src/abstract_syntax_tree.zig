@@ -12,6 +12,9 @@ pub const Statement = union(enum) {
     return_stmt: ReturnStatement,
     expression_stmt: ExpressionStatement,
     block_stmt: BlockStatement,
+    while_stmt: WhileStatement,
+    break_stmt: BreakStatement,
+    continue_stmt: ContinueStatement,
     pub fn stringValue(self: *const Statement, buf: *String) !void {
         return switch (self.*) {
             inline else => |item| try item.stringValue(buf),
@@ -37,6 +40,7 @@ pub const Expression = union(enum) {
     array_literal: ArrayLiteral,
     index_exp: IndexExpression,
     hash_literal: HashLiteral,
+    assignment: AssignStatement,
     pub fn stringValue(self: *const Expression, buf: *String) !void {
         return switch (self.*) {
             inline else => |item| try item.stringValue(buf),
@@ -83,6 +87,20 @@ pub const ExpressionStatement = struct {
     }
     pub fn eval(self: ExpressionStatement, alloc: std.mem.Allocator, env: *environment) !*Object {
         return try self.expression.eval(alloc, env);
+    }
+};
+
+pub const AssignStatement = struct {
+    identifier: Identifier = undefined,
+    value: *Expression = undefined,
+    pub fn stringValue(self: AssignStatement, buf: *String) String.Error!void {
+        try self.identifier.stringValue(buf);
+        try buf.concat(" = ");
+        try self.value.stringValue(buf);
+    }
+    pub fn eval(self: AssignStatement, alloc: std.mem.Allocator, env: *environment) !*Object {
+        try env.insert(self.identifier.name, try self.value.eval(alloc, env));
+        return &inbuilt.NULL_OBJECT;
     }
 };
 
@@ -443,10 +461,6 @@ pub const BlockStatement = struct {
     statements: std.ArrayList(Statement),
     pub fn stringValue(self: BlockStatement, buf: *String) String.Error!void {
         try buf.concat("{ ");
-        // var i: usize = 0;
-        // while (i < self.statements.items.len) : (i += 1) {
-        //     try self.statements.items[i].toString(buf);
-        // }
         for (self.statements.items) |stmt| {
             try stmt.stringValue(buf);
         }
@@ -456,12 +470,69 @@ pub const BlockStatement = struct {
         var result: *object.Object = &inbuilt.NULL_OBJECT;
         for (self.statements.items) |stmt| {
             const evaled = try stmt.eval(alloc, env);
-            if (object.isReturnTag(evaled.*) or object.isErrorTag(evaled.*)) {
+            if (object.isReturnTag(evaled.*) or object.isErrorTag(evaled.*) or
+                evaled == &inbuilt.BREAK_OBJECT or evaled == &inbuilt.CONTINUE_OBJECT)
+            {
                 return evaled;
             }
             result = evaled;
         }
         return result;
+    }
+};
+
+pub const WhileStatement = struct {
+    condition: *Expression = undefined,
+    whileBlock: BlockStatement = undefined,
+    pub fn stringValue(self: WhileStatement, buf: *String) String.Error!void {
+        try buf.concat("while ");
+        try self.condition.stringValue(buf);
+        try buf.concat(" ");
+        try self.whileBlock.stringValue(buf);
+    }
+    pub fn eval(self: *const WhileStatement, alloc: std.mem.Allocator, env: *environment) anyerror!*Object {
+        while (true) {
+            const condition = try self.condition.eval(alloc, env);
+            if (object.isErrorTag(condition.*)) {
+                return condition;
+            }
+            if (object.isTruthy(condition)) {
+                const evaled = try self.whileBlock.eval(alloc, env);
+                if (object.isErrorTag(evaled.*) or object.isReturnTag(evaled.*)) {
+                    return evaled;
+                }
+                if (evaled == &inbuilt.BREAK_OBJECT) {
+                    break;
+                }
+                if (evaled == &inbuilt.CONTINUE_OBJECT) {
+                    continue;
+                }
+            } else {
+                break;
+            }
+        }
+        const result: *object.Object = &inbuilt.NULL_OBJECT;
+        return result;
+    }
+};
+
+pub const BreakStatement = struct {
+    token: token.tokens = undefined,
+    pub fn stringValue(self: BreakStatement, buf: *String) String.Error!void {
+        _ = try self.token.stringValue(buf);
+    }
+    pub fn eval(_: *const BreakStatement, _: std.mem.Allocator, _: *environment) anyerror!*Object {
+        return &inbuilt.BREAK_OBJECT;
+    }
+};
+
+pub const ContinueStatement = struct {
+    token: token.tokens = undefined,
+    pub fn stringValue(self: ContinueStatement, buf: *String) String.Error!void {
+        _ = try self.token.stringValue(buf);
+    }
+    pub fn eval(_: *const ContinueStatement, _: std.mem.Allocator, _: *environment) anyerror!*Object {
+        return &inbuilt.CONTINUE_OBJECT;
     }
 };
 
