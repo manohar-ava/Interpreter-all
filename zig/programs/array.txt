@@ -1,0 +1,14 @@
+let arr = [1,false,"hello",3]
+
+
+arr = push(arr, true);
+let newarr = push(arr, 99)
+
+log(newarr)
+log(len(newarr))
+
+log(arr)
+log(len(arr))
+
+
+

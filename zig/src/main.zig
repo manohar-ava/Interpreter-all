@@ -16,7 +16,7 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
     if (args.len < 2) {
         try stdout.print("[ REPL System v0.0.1 Initialized ]\nWelcome Champ. Your coding adventure begins here... ⚡\n", .{});
-        var inputBuf: [65536]u8 = undefined;
+        var inputBuf: [128536]u8 = undefined;
         var lastPos: usize = 0;
         while (true) {
             try stdout.print(">> ", .{});
@@ -48,8 +48,9 @@ pub fn main() !void {
         defer file.close();
         // Get the file size
         const file_size = try file.getEndPos();
+        const usizeValue: usize = @intCast(file_size);
         // Read the entire file content
-        const content = try file.reader().readAllAlloc(allocator, file_size);
+        const content = try file.reader().readAllAlloc(allocator, usizeValue);
         defer allocator.free(content);
         const lex = try lexer.newLexer(&allocator, content);
         var parser = try Parser.newParser(&allocator, lex);
@@ -65,7 +66,7 @@ pub fn main() !void {
                     var objPrintBuf = String.init(allocator);
                     defer objPrintBuf.deinit();
                     try evalValue.stringValue(&objPrintBuf);
-                    try stdout.print(">>{s}\n", .{objPrintBuf.str()});
+                    try stdout.print("{s}\n", .{objPrintBuf.str()});
                 },
             }
         }

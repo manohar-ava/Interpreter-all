@@ -1,0 +1,18 @@
+let newAdder = func(x){
+  func(n){
+    x + n
+  }
+}
+
+let twoAdder = newAdder(2);
+let fiveAdder = newAdder(5);
+
+let callTwice = func(x, fn){
+  fn(fn(x))
+}
+
+log(callTwice(2,twoAdder))
+
+log(callTwice(1,fiveAdder))
+
+log(fiveAdder(10))

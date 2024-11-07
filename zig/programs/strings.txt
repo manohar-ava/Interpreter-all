@@ -1,0 +1,14 @@
+let makeGreeter = func(greeting){
+  func(name){
+    log(greeting + " " + name + " !") 
+  }
+}
+
+let helloGreeter = makeGreeter("hello");
+let welcomeGreeter = makeGreeter("welcome");
+
+helloGreeter("manohar")
+welcomeGreeter("manohar")
+len("manohar")
+
+

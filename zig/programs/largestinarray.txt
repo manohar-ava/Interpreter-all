@@ -1,0 +1,13 @@
+let a = [1,3,5,34,88,9,23]
+let alen = len(a)
+let i = 0;
+let max = 0;
+
+while(i<alen){
+    if(a[i] > max){
+        max = a[i]
+    }
+    i = i+1
+}
+
+log(max)

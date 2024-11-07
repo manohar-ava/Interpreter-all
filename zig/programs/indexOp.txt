@@ -1,0 +1,14 @@
+let arr = [1, 2, false]
+
+let map = {a:123, b:456, c:789}
+
+log(arr)
+log("indexing at 1 : " , arr[1])
+log("indexing at 0 : " , arr[0])
+log("indexing at 99 : " , arr[99])
+log("--------------------------")
+
+log({1:2+4,"key":false}[1])
+
+log({1:2+4,"key":false}["key"])
+
